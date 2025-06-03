@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "suiteeval"
+description = "Tools for running IR Evaluation Suites"
+readme = "README.md"
+authors = [
+    {name = "Sean MacAvaney", email = "sean.macavaney@glasgow.ac.uk"},
+]
+classifiers = [
+  "Programming Language :: Python",
+  "Operating System :: OS Independent",
+  "Topic :: Text Processing",
+  "Topic :: Text Processing :: Indexing",
+]
+requires-python = ">=3.10"
+dynamic = ["version", "dependencies"]
+
+[tool.setuptools.dynamic]
+version = {attr = "suiteeval.__version__"}
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+exclude = ["tests"]
+
+[project.urls]
+Repository = "https://github.com/seanmacavaney/suiteeval"
+"Bug Tracker" = "https://github.com/seanmacavaney/suiteeval/issues"
