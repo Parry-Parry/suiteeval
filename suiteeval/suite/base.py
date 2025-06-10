@@ -1,15 +1,19 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 import pandas as pd
 import pyterrier as pt
+from functools import cached_property
+import ir_datasets as irds
+from typing import Dict, Generator
 
 
 class Suite(ABC):
     """
     Abstract base class for a suite of evaluations.
     """
+    _datasets: Dict[str, str] = {}
 
     @staticmethod
-    def get_topics(dataset):
+    def get_topics(dataset) -> pd.DataFrame:
         """
         Get the topics from a dataset.
 
@@ -20,7 +24,7 @@ class Suite(ABC):
         return topics
 
     @staticmethod
-    def get_qrels(dataset):
+    def get_qrels(dataset) -> pd.DataFrame:
         """
         Get the qrels from a dataset.
 
@@ -30,13 +34,13 @@ class Suite(ABC):
         qrels = pd.DataFrame(dataset.qrels_iter()).rename(columns={'query_id': 'qid', 'document_id': 'docno', 'relevance': 'label'})
         return qrels
 
-    @property
-    @abstractmethod
-    def datasets(self):
+    @cached_property
+    def datasets(self) -> Generator[str, irds.Dataset]:
         """
         List of (name, ir_datasets.Dataset) pairs included in the suite.
         """
-        raise NotImplementedError("Subclasses must implement datasets property")
+        for name, dataset in self._datasets.items():
+            yield name, irds.load(dataset)
 
     def __call__(self,
                  pipelines,
@@ -58,7 +62,7 @@ class Suite(ABC):
                  save_mode='warn',
                  save_format='trec',
                  precompute_prefix=True,
-                 **kwargs):
+                 **kwargs) -> pd.DataFrame:
         """
         Run the evaluation over all datasets in the suite.
 
@@ -134,7 +138,7 @@ class Suite(ABC):
         save_format='trec',
         precompute_prefix=False,
         **kwargs
-    ):
+    ) -> pd.DataFrame:
         """
         Default evaluation using pt.Experiment on a single dataset.
 
