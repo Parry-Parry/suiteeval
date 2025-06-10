@@ -3,6 +3,7 @@ import shutil
 from abc import ABC, abstractmethod
 from typing import Any, Iterable, Dict
 
+
 class TemporaryIndex(ABC):
     """
     Abstract base class for a temporary index context manager.
@@ -22,14 +23,16 @@ class TemporaryIndex(ABC):
     def __exit__(self, exc_type, exc_val, exc_tb):
         # Cleanup index and temporary directory
         try:
-            if hasattr(self.index, 'close'):
+            if hasattr(self.index, "close"):
                 # Some index implementations may require explicit close
                 self.index.close()
         finally:
             self._cleanup(self._dir)
 
     @abstractmethod
-    def _create_index(self, model: Any, documents: Iterable[Dict[str, Any]], path: str) -> Any:
+    def _create_index(
+        self, model: Any, documents: Iterable[Dict[str, Any]], path: str
+    ) -> Any:
         """
         Instantiate and build the index in `path` using `model` on `documents`.
         Returns the index object.

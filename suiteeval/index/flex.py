@@ -15,14 +15,23 @@ class TemporaryFlexIndex(TemporaryIndex):
             pipeline = model >> flex_index.np_retriever()
             results = pipeline.search("query text")
     """
-    def __init__(self, model: Any, documents: Iterable[Dict[str, Any]], sim_fn: Any = None, verbose: bool = True):
+
+    def __init__(
+        self,
+        model: Any,
+        documents: Iterable[Dict[str, Any]],
+        sim_fn: Any = None,
+        verbose: bool = True,
+    ):
         super().__init__()
         self.model = model
         self.documents = documents
         self.sim_fn = sim_fn
         self.verbose = verbose
 
-    def _create_index(self, model: Any, documents: Iterable[Dict[str, Any]], path: str) -> FlexIndex:
+    def _create_index(
+        self, model: Any, documents: Iterable[Dict[str, Any]], path: str
+    ) -> FlexIndex:
         # Instantiate FlexIndex
         if self.sim_fn is not None:
             flex = FlexIndex(path, sim_fn=self.sim_fn, verbose=self.verbose)

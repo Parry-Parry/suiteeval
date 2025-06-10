@@ -15,14 +15,22 @@ class TemporaryTerrierIndex(TemporaryIndex):
             bm25 = pt.BatchRetrieve(terrier_index, wmodel='BM25')
             results = bm25.search("query text")
     """
-    def __init__(self, documents: Iterable[Dict[str, Any]], indexer_kwargs: Dict[str, Any] = None, factory_kwargs: Dict[str, Any] = None):
+
+    def __init__(
+        self,
+        documents: Iterable[Dict[str, Any]],
+        indexer_kwargs: Dict[str, Any] = None,
+        factory_kwargs: Dict[str, Any] = None,
+    ):
         # model is fixed as TerrierIndex class
         super().__init__()
         self.documents = documents
         self.factory_kwargs = factory_kwargs or {}
         self.indexer_kwargs = indexer_kwargs or {}
 
-    def _create_index(self, documents: Iterable[Dict[str, Any]], path: str) -> TerrierIndex:
+    def _create_index(
+        self, documents: Iterable[Dict[str, Any]], path: str
+    ) -> TerrierIndex:
         # Instantiate TerrierIndex at path with any provided kwargs
         terrier = IterDictIndexer(path, **self.indexer_kwargs)
         terrier.index(documents)

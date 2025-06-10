@@ -14,13 +14,18 @@ class TemporaryPisaIndex(TemporaryIndex):
             bm25 = pisa_index.bm25()
             results = bm25.search("query text")
     """
-    def __init__(self, documents: Iterable[Dict[str, Any]], fields: Any = None, **kwargs):
+
+    def __init__(
+        self, documents: Iterable[Dict[str, Any]], fields: Any = None, **kwargs
+    ):
         super().__init__()
         self.documents = documents
         self.fields = fields
         self.kwargs = kwargs
 
-    def _create_index(self, documents: Iterable[Dict[str, Any]], path: str) -> PisaIndex:
+    def _create_index(
+        self, documents: Iterable[Dict[str, Any]], path: str
+    ) -> PisaIndex:
         # model is the PISAIndex class
         if self.fields is not None:
             pisa = PisaIndex(path, fields=self.fields, **self.kwargs)

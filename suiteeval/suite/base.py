@@ -14,6 +14,7 @@ class SuiteMeta(type):
     - enforces singleton instances per suite-class
     - provides a .register(...) helper
     """
+
     _classes: Dict[str, type] = {}
     _instances: Dict[str, "Suite"] = {}
 
@@ -25,10 +26,7 @@ class SuiteMeta(type):
 
     @classmethod
     def register(
-        mcs,
-        suite_name: str,
-        datasets: List[str],
-        names: Optional[List[str]] = None
+        mcs, suite_name: str, datasets: List[str], names: Optional[List[str]] = None
     ) -> "Suite":
         """
         Create (or retrieve) a Suite singleton that wraps the given datasets.
@@ -70,19 +68,15 @@ class Suite(ABC, metaclass=SuiteMeta):
 
     @staticmethod
     def get_topics(dataset) -> pd.DataFrame:
-        topics = (
-            pd.DataFrame(dataset.queries_iter())
-              .rename(columns={"query_id": "qid", "text": "query"})
+        topics = pd.DataFrame(dataset.queries_iter()).rename(
+            columns={"query_id": "qid", "text": "query"}
         )
         return topics
 
     @staticmethod
     def get_qrels(dataset) -> pd.DataFrame:
-        qrels = (
-            pd.DataFrame(dataset.qrels_iter())
-              .rename(columns={"query_id": "qid",
-                               "document_id": "docno",
-                               "relevance": "label"})
+        qrels = pd.DataFrame(dataset.qrels_iter()).rename(
+            columns={"query_id": "qid", "document_id": "docno", "relevance": "label"}
         )
         return qrels
 
@@ -112,7 +106,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         save_mode="warn",
         save_format="trec",
         precompute_prefix=True,
-        **kwargs
+        **kwargs,
     ) -> pd.DataFrame:
         results = []
         for ds_name, ds in self.datasets:
@@ -140,7 +134,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                 save_mode=save_mode,
                 save_format=save_format,
                 precompute_prefix=precompute_prefix,
-                **kwargs
+                **kwargs,
             )
             df["dataset"] = ds_name
             results.append(df)
@@ -170,7 +164,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         save_mode="warn",
         save_format="trec",
         precompute_prefix=False,
-        **kwargs
+        **kwargs,
     ) -> pd.DataFrame:
         return pt.Experiment(
             retr_systems=pipelines,
@@ -194,7 +188,7 @@ class Suite(ABC, metaclass=SuiteMeta):
             save_mode=save_mode,
             save_format=save_format,
             precompute_prefix=precompute_prefix,
-            **kwargs
+            **kwargs,
         )
 
 
