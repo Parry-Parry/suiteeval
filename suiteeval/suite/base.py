@@ -1,9 +1,12 @@
 from abc import ABC
-from functools import cached_property
-from typing import Dict, Generator, List, Optional
+from functools import cache, cached_property
+from typing import Dict, Generator, List, Optional, Any, Union, Sequence
 import ir_datasets as irds
+from ir_datasets import Dataset
+from ir_measures import nDCG, Measure, parse_measure, parse_trec_measure
 import pandas as pd
 import pyterrier as pt
+import logging
 
 
 class SuiteMeta(type):
@@ -26,7 +29,11 @@ class SuiteMeta(type):
 
     @classmethod
     def register(
-        mcs, suite_name: str, datasets: List[str], names: Optional[List[str]] = None
+        mcs,
+        suite_name: str,
+        datasets: List[str],
+        names: Optional[List[str]] = None,
+        metadata: Optional[List[Dict[str, Any]]] = None,
     ) -> "Suite":
         """
         Create (or retrieve) a Suite singleton that wraps the given datasets.
@@ -36,6 +43,7 @@ class SuiteMeta(type):
             datasets:    List of ir_datasets identifiers.
             names:       Optional list of dataset-display names;
                          if omitted, uses the same strings as `datasets`.
+            metadata:    Optional list of metadata dictionaries for each dataset.
 
         Returns:
             The singleton Suite instance.
@@ -46,7 +54,7 @@ class SuiteMeta(type):
 
         # build the mapping name→dataset_id
         ds_names = names or datasets
-        mapping = dict(zip(ds_names, datasets))
+        mapping = dict(zip(ds_names, datasets, metadata or [{}] * len(datasets)))
 
         # dynamically create a new subclass of Suite with the right _datasets
         attrs = {"_datasets": mapping}
@@ -64,17 +72,139 @@ class Suite(ABC, metaclass=SuiteMeta):
         _datasets: Dict[str, ir_datasets.Dataset ID]
     """
 
-    _datasets: Dict[str, str] = {}
+    _datasets: Union[List[str], Dict[str, str]] = {}
+    _metadata: Dict[str, Any] = {}
+    _measures: List[Measure] = None
+
+    def __init__(self):
+        """
+        Initializes the suite.
+        """
+        self.coerce_measures(self._metadata)
+        self.__post_init__()
+
+    def __post_init__(self):
+        assert self._datasets, "Suite must have at least one dataset defined in _datasets"
+        assert isinstance(self._datasets, dict) or isinstance(self._datasets, list), "Suite _datasets must be a dict mapping names to dataset ID or a list of dataset IDs"
+        if isinstance(self._datasets, dict):
+            assert all(isinstance(k, str) and isinstance(v, str) for k, v in self._datasets.items()), \
+                "Suite _datasets must map string names to string dataset IDs"
+        else:
+            assert all(isinstance(ds, str) for ds in self._datasets), \
+                "Suite _datasets must be a list of dataset IDs"
+        assert self._measures is not None, "Suite must have measures defined in _measures"      
 
     @staticmethod
-    def get_topics(dataset) -> pd.DataFrame:
+    def parse_measures(measures: List[Union[str, Measure]]) -> List[Measure]:
+        """
+        Parses a list of measures, converting strings to Measure instances.
+        """
+        parsed_measures = []
+        for measure in measures:
+            if isinstance(measure, str):
+                # Convert string to Measure instance
+                try:
+                    parsed_measure = parse_measure(measure)
+                except ValueError:
+                    pass
+                try:
+                    parsed_measure = parse_trec_measure(measure)
+                except ValueError:
+                    pass
+
+                if type(parsed_measure) is Measure:
+                    parsed_measure = [parsed_measure]
+
+                for pm in parsed_measure:
+                    if isinstance(pm, Measure):
+                        parsed_measures.append(pm)
+                    else:
+                        raise ValueError(f"Invalid measure type: {type(pm)}")
+            elif isinstance(measure, Measure):
+                parsed_measures.append(measure)
+            else:
+                raise ValueError(f"Invalid measure type: {type(measure)}")
+        return parsed_measures
+
+    def coerce_measures(self, metadata: List[Dict[str, Any]]) -> None:
+        """
+        Checks for recommended measures in the metadata or optionally the dataset documentation.
+        """
+        if self._measures is not None:
+            return
+
+        if "official_measures" in metadata:
+            # If the metadata has official measures, use those
+            self._measures = self.parse_measures(metadata["official_measures"])
+            return
+
+        for ds_id, ds in self._datasets.items():
+            try:
+                # Try to load the dataset and its measures
+                dataset = irds.load(ds)
+                documentation = dataset.documentation()
+                if hasattr(documentation, "official_measures"):
+                    self._measures = self.parse_measures(documentation["official_measures"])
+                    break
+            except Exception as e:
+                logging.warning(f"Failed to load measures for dataset {ds_id}: {e}")
+                pass
+        if self._measures is None:
+            logging.warning(
+                "No measures defined for this suite. Defaulting to nDCG@10."
+            )
+            self._measures = [nDCG@10]
+
+    def coerce_pipelines(self, dataset: Dataset, pipeline_generators: Sequence[callable]) -> Generator[Transformer]:
+        """
+        Coerces indexing and ranking generators to pipelines.
+        """
+        def doc_iterator():
+            for doc in dataset.documents_iter():
+                yield {"docno": doc["doc_id"], "text": doc["text"]}
+
+        for gen in pipeline_generators:
+            yield gen(doc_iterator())
+
+    @cached_property
+    def measures(self, dataset) -> List[Measure]:
+        """
+        Returns the list of measures that this suite uses.
+        """
+        return self._measures
+
+    @cache
+    def get_measures(self, dataset) -> List[Measure]:
+        """
+        Returns the measures for the given dataset.
+        If the suite has a single set of measures, it returns that.
+        """
+        if type(self._measures) is list:
+            return self._measures
+        return self._measures[dataset]
+
+    @cache
+    def get_topics(self, dataset) -> pd.DataFrame:
+        """
+        Returns the topics DataFrame for the given dataset.
+        Columns:
+            - qid: Query ID
+            - query: Query text
+        """
         topics = pd.DataFrame(dataset.queries_iter()).rename(
             columns={"query_id": "qid", "text": "query"}
         )
         return topics
 
-    @staticmethod
-    def get_qrels(dataset) -> pd.DataFrame:
+    @cache
+    def get_qrels(self, dataset) -> pd.DataFrame:
+        """
+        Returns the qrels DataFrame for the given dataset.
+        Columns:
+            - qid: Query ID
+            - docno: Document ID
+            - label: Relevance label
+        """
         qrels = pd.DataFrame(dataset.qrels_iter()).rename(
             columns={"query_id": "qid", "document_id": "docno", "relevance": "label"}
         )
@@ -82,47 +212,68 @@ class Suite(ABC, metaclass=SuiteMeta):
 
     @cached_property
     def datasets(self) -> Generator[str, irds.Dataset, None]:
-        for name, ds_id in self._datasets.items():
-            yield name, irds.load(ds_id)
+        """
+        Returns a generator yielding dataset names and their ir_datasets.Dataset instances.
+        Yields:
+            Tuple of (dataset_name, dataset_instance)
+        """
+        if type(self._datasets) is list:
+            # If _datasets is a list, assume they are dataset IDs
+            for ds_id in self._datasets:
+                yield ds_id, irds.load(ds_id)
+        elif type(self._datasets) is dict:
+            for name, ds_id in self._datasets.items():
+                yield name, irds.load(ds_id)
+        else:
+            raise ValueError("Suite _datasets must be a list or dict mapping names to dataset IDs.")
 
     def __call__(
         self,
-        pipelines,
-        eval_metrics,
-        names=None,
-        perquery=False,
-        dataframe=True,
-        batch_size=None,
-        filter_by_qrels=False,
-        filter_by_topics=True,
-        baseline=None,
-        test="t",
-        correction=None,
-        correction_alpha=0.05,
-        highlight=None,
-        round=None,
-        verbose=False,
-        save_dir=None,
-        save_mode="warn",
-        save_format="trec",
-        precompute_prefix=True,
-        **kwargs,
+        pipelines: Sequence[Any] = None,
+        ranking_generators: Sequence[callable] = None,
+        eval_metrics: Sequence[Any] = None,
+        names: Optional[Sequence[str]] = None,
+        subset: Optional[str] = None,
+        perquery: bool = False,
+        batch_size: Optional[int] = None,
+        filter_by_qrels: bool = False,
+        filter_by_topics: bool = True,
+        baseline: Optional[int] = None,
+        test: str = "t",
+        correction: Optional[str] = None,
+        correction_alpha: float = 0.05,
+        highlight: Optional[str] = None,
+        round: Optional[Union[int, Dict[str, int]]] = None,
+        verbose: bool = False,
+        save_dir: Optional[str] = None,
+        save_mode: str = "warn",
+        save_format: str = "trec",
+        precompute_prefix: bool = False,
     ) -> pd.DataFrame:
+        assert pipelines or (ranking_generators), \
+            "You must provide either pipelines or both ranking_generators and indexing_generators."
+        if len(pipelines) > 5 and baseline is not None:
+            logging.warning("Baseline is set with several pipelines, this may take a while.")
+
         results = []
         for ds_name, ds in self.datasets:
+            if subset and ds_name != subset:
+                continue
             topics = self.get_topics(ds)
             qrels = self.get_qrels(ds)
-            df = self.evaluate(
+            if not pipelines:
+                pipelines = self.coerce_pipelines(ds, ranking_generators)
+            df = pt.Experiment(
                 pipelines=pipelines,
-                eval_metrics=eval_metrics,
+                eval_metrics=eval_metrics or self.measures,
                 topics=topics,
                 qrels=qrels,
-                names=names,
                 perquery=perquery,
-                dataframe=dataframe,
-                batch_size=batch_size,
+                dataframe=True,
                 filter_by_qrels=filter_by_qrels,
                 filter_by_topics=filter_by_topics,
+                names=names,
+                batch_size=batch_size,
                 baseline=baseline,
                 test=test,
                 correction=correction,
@@ -134,62 +285,11 @@ class Suite(ABC, metaclass=SuiteMeta):
                 save_mode=save_mode,
                 save_format=save_format,
                 precompute_prefix=precompute_prefix,
-                **kwargs,
             )
             df["dataset"] = ds_name
             results.append(df)
 
         return pd.concat(results, ignore_index=True) if results else pd.DataFrame()
-
-    def evaluate(
-        self,
-        pipelines,
-        eval_metrics,
-        topics,
-        qrels,
-        names=None,
-        perquery=False,
-        dataframe=True,
-        batch_size=None,
-        filter_by_qrels=False,
-        filter_by_topics=True,
-        baseline=None,
-        test="t",
-        correction=None,
-        correction_alpha=0.05,
-        highlight=None,
-        round=None,
-        verbose=False,
-        save_dir=None,
-        save_mode="warn",
-        save_format="trec",
-        precompute_prefix=False,
-        **kwargs,
-    ) -> pd.DataFrame:
-        return pt.Experiment(
-            retr_systems=pipelines,
-            topics=topics,
-            qrels=qrels,
-            eval_metrics=eval_metrics,
-            names=names,
-            perquery=perquery,
-            dataframe=dataframe,
-            batch_size=batch_size,
-            filter_by_qrels=filter_by_qrels,
-            filter_by_topics=filter_by_topics,
-            baseline=baseline,
-            test=test,
-            correction=correction,
-            correction_alpha=correction_alpha,
-            highlight=highlight,
-            round=round,
-            verbose=verbose,
-            save_dir=save_dir,
-            save_mode=save_mode,
-            save_format=save_format,
-            precompute_prefix=precompute_prefix,
-            **kwargs,
-        )
 
 
 """
