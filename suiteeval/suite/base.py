@@ -84,15 +84,24 @@ class Suite(ABC, metaclass=SuiteMeta):
         self.__post_init__()
 
     def __post_init__(self):
-        assert self._datasets, "Suite must have at least one dataset defined in _datasets"
-        assert isinstance(self._datasets, dict) or isinstance(self._datasets, list), "Suite _datasets must be a dict mapping names to dataset ID or a list of dataset IDs"
+        assert (
+            self._datasets
+        ), "Suite must have at least one dataset defined in _datasets"
+        assert isinstance(self._datasets, dict) or isinstance(
+            self._datasets, list
+        ), "Suite _datasets must be a dict mapping names to dataset ID or a list of dataset IDs"
         if isinstance(self._datasets, dict):
-            assert all(isinstance(k, str) and isinstance(v, str) for k, v in self._datasets.items()), \
-                "Suite _datasets must map string names to string dataset IDs"
+            assert all(
+                isinstance(k, str) and isinstance(v, str)
+                for k, v in self._datasets.items()
+            ), "Suite _datasets must map string names to string dataset IDs"
         else:
-            assert all(isinstance(ds, str) for ds in self._datasets), \
-                "Suite _datasets must be a list of dataset IDs"
-        assert self._measures is not None, "Suite must have measures defined in _measures"      
+            assert all(
+                isinstance(ds, str) for ds in self._datasets
+            ), "Suite _datasets must be a list of dataset IDs"
+        assert (
+            self._measures is not None
+        ), "Suite must have measures defined in _measures"
 
     @staticmethod
     def parse_measures(measures: List[Union[str, Measure]]) -> List[Measure]:
@@ -144,7 +153,9 @@ class Suite(ABC, metaclass=SuiteMeta):
                 dataset = irds.load(ds)
                 documentation = dataset.documentation()
                 if hasattr(documentation, "official_measures"):
-                    self._measures = self.parse_measures(documentation["official_measures"])
+                    self._measures = self.parse_measures(
+                        documentation["official_measures"]
+                    )
                     break
             except Exception as e:
                 logging.warning(f"Failed to load measures for dataset {ds_id}: {e}")
@@ -153,12 +164,15 @@ class Suite(ABC, metaclass=SuiteMeta):
             logging.warning(
                 "No measures defined for this suite. Defaulting to nDCG@10."
             )
-            self._measures = [nDCG@10]
+            self._measures = [nDCG @ 10]
 
-    def coerce_pipelines(self, dataset: Dataset, pipeline_generators: Sequence[callable]) -> Generator[Transformer]:
+    def coerce_pipelines(
+        self, dataset: Dataset, pipeline_generators: Sequence[callable]
+    ) -> Generator[Transformer]:
         """
         Coerces indexing and ranking generators to pipelines.
         """
+
         def doc_iterator():
             for doc in dataset.documents_iter():
                 yield {"docno": doc["doc_id"], "text": doc["text"]}
@@ -225,7 +239,9 @@ class Suite(ABC, metaclass=SuiteMeta):
             for name, ds_id in self._datasets.items():
                 yield name, irds.load(ds_id)
         else:
-            raise ValueError("Suite _datasets must be a list or dict mapping names to dataset IDs.")
+            raise ValueError(
+                "Suite _datasets must be a list or dict mapping names to dataset IDs."
+            )
 
     def __call__(
         self,
@@ -250,10 +266,13 @@ class Suite(ABC, metaclass=SuiteMeta):
         save_format: str = "trec",
         precompute_prefix: bool = False,
     ) -> pd.DataFrame:
-        assert pipelines or (ranking_generators), \
-            "You must provide either pipelines or both ranking_generators and indexing_generators."
+        assert pipelines or (
+            ranking_generators
+        ), "You must provide either pipelines or both ranking_generators and indexing_generators."
         if len(pipelines) > 5 and baseline is not None:
-            logging.warning("Baseline is set with several pipelines, this may take a while.")
+            logging.warning(
+                "Baseline is set with several pipelines, this may take a while."
+            )
 
         results = []
         for ds_name, ds in self.datasets:

@@ -29,15 +29,19 @@ class TemporaryFlexIndex(TemporaryIndex):
         self.sim_fn = sim_fn
         self.verbose = verbose
 
-    def _create_index(
-        self, model: Any, documents: Iterable[Dict[str, Any]], path: str
-    ) -> FlexIndex:
+    def _create_index(self, path: str) -> FlexIndex:
         # Instantiate FlexIndex
         if self.sim_fn is not None:
             flex = FlexIndex(path, sim_fn=self.sim_fn, verbose=self.verbose)
         else:
             flex = FlexIndex(path, verbose=self.verbose)
         # Build and run indexing pipeline
-        pipeline = model >> flex.indexer()
-        pipeline.index(documents)
+        pipeline = self.model >> flex.indexer()
+        pipeline.index(self.documents)
         return flex
+
+    def yield_retriever(self):
+        if self.sim_fn is not None:
+            return self.model >> self.index.np_retriever(sim_fn=self.sim_fn)
+        else:
+            return self.model >> self.index.np_retriever()

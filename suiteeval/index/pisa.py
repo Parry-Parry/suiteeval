@@ -23,14 +23,15 @@ class TemporaryPisaIndex(TemporaryIndex):
         self.fields = fields
         self.kwargs = kwargs
 
-    def _create_index(
-        self, documents: Iterable[Dict[str, Any]], path: str
-    ) -> PisaIndex:
+    def _create_index(self, path: str) -> PisaIndex:
         # model is the PISAIndex class
         if self.fields is not None:
             pisa = PisaIndex(path, fields=self.fields, **self.kwargs)
         else:
             pisa = PisaIndex(path, **self.kwargs)
         # Build and run indexing
-        pisa.index(documents)
+        pisa.index(self.documents)
         return pisa
+
+    def yield_retriever(self):
+        return self.index.bm25()

@@ -28,9 +28,9 @@ datasets = [
     "beir/quora/test",
     "beir/scifact/test",
     "beir/trec-covid",
-    "beir/webis-touche2020/v2"
+    "beir/webis-touche2020/v2",
 ]
-measures = [nDCG@10]
+measures = [nDCG @ 10]
 
 
 class BEIR(Suite):
@@ -46,11 +46,12 @@ class BEIR(Suite):
         beir_suite = BEIR()
         results = beir_suite(pipeline)
     """
+
     _datasets = datasets
     _measures = measures
     _metadata = {
         "official_measures": measures,
-        "description": " Beir is a suite of benchmarks to test zero-shot transfer."
+        "description": " Beir is a suite of benchmarks to test zero-shot transfer.",
     }
 
     def __call__(
@@ -98,17 +99,21 @@ class BEIR(Suite):
             save_dir=save_dir,
             save_mode=save_mode,
             save_format=save_format,
-            precompute_prefix=precompute_prefix
+            precompute_prefix=precompute_prefix,
         )
 
         if not results:
             return pd.DataFrame()
 
         cqadupstack = results[results["dataset"].str.startswith("beir/cqadupstack/")]
-        not_cqadupstack = results[~results["dataset"].str.startswith("beir/cqadupstack/")]
+        not_cqadupstack = results[
+            ~results["dataset"].str.startswith("beir/cqadupstack/")
+        ]
 
         if perquery:
-            cqadupstack = cqadupstack.groupby(["dataset", "qid", "name"]).mean().reset_index()
+            cqadupstack = (
+                cqadupstack.groupby(["dataset", "qid", "name"]).mean().reset_index()
+            )
         else:
             cqadupstack = cqadupstack.groupby(["dataset", "name"]).mean().reset_index()
         cqadupstack["dataset"] = "beir/cqadupstack"

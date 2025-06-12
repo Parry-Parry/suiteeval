@@ -1,7 +1,8 @@
 import tempfile
 import shutil
 from abc import ABC, abstractmethod
-from typing import Any, Iterable, Dict
+from typing import Any
+from pyterrier import Transformer
 
 
 class TemporaryIndex(ABC):
@@ -30,12 +31,18 @@ class TemporaryIndex(ABC):
             self._cleanup(self._dir)
 
     @abstractmethod
-    def _create_index(
-        self, model: Any, documents: Iterable[Dict[str, Any]], path: str
-    ) -> Any:
+    def _create_index(self, path: str) -> Any:
         """
         Instantiate and build the index in `path` using `model` on `documents`.
         Returns the index object.
+        """
+        pass
+
+    @abstractmethod
+    def yield_retriever(self) -> Transformer:
+        """
+        Yield documents for retrieval.
+        This can be overridden by subclasses if needed.
         """
         pass
 
