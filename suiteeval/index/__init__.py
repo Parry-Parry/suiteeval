@@ -2,6 +2,7 @@ from suiteeval._optional import (
     pyterrier_dr_available,
     pyterrier_pisa_available,
     pyterrier_available,
+    pyterrier_splade_available
 )
 import importlib
 from typing import Any, Dict
@@ -18,6 +19,10 @@ if pyterrier_pisa_available():
     TemporaryPISAIndex = _mod.TemporaryPISAIndex
     _available_indices["TemporaryPISAIndex"] = TemporaryPISAIndex
 
+    if pyterrier_splade_available():
+        TemporarySpladeIndex = _mod.TemporarySpladeIndex
+        _available_indices["TemporarySpladeIndex"] = TemporarySpladeIndex
+
 if pyterrier_available():
     _mod = importlib.import_module("suiteeval.index.terrier")
     TemporaryTerrierIndex = _mod.TemporaryTerrierIndex
@@ -25,7 +30,7 @@ if pyterrier_available():
 
 __all__ = [
     name
-    for name in ("TemporaryFlexIndex", "TemporaryPISAIndex", "TemporaryTerrierIndex")
+    for name in ("TemporaryFlexIndex", "TemporaryPISAIndex", "TemporaryTerrierIndex", "TemporarySpladeIndex")
     if name in globals()
 ]
 

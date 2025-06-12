@@ -39,9 +39,3 @@ class TemporaryFlexIndex(TemporaryIndex):
         pipeline = self.model >> flex.indexer()
         pipeline.index(self.documents)
         return flex
-
-    def yield_retriever(self):
-        if self.sim_fn is not None:
-            return self.model >> self.index.np_retriever(sim_fn=self.sim_fn)
-        else:
-            return self.model >> self.index.np_retriever()

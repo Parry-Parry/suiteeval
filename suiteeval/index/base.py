@@ -38,14 +38,6 @@ class TemporaryIndex(ABC):
         """
         pass
 
-    @abstractmethod
-    def yield_retriever(self) -> Transformer:
-        """
-        Yield documents for retrieval.
-        This can be overridden by subclasses if needed.
-        """
-        pass
-
     def _cleanup(self, path: str):
         """
         Remove the temporary directory and its contents.

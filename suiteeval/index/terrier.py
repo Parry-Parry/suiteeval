@@ -32,7 +32,3 @@ class TemporaryTerrierIndex(TemporaryIndex):
         terrier = IterDictIndexer(path, **self.indexer_kwargs)
         terrier.index(self.documents)
         return IndexFactory.of(path, **self.factory_kwargs)
-
-    def yield_retriever(self):
-        # Return a BatchRetrieve object for the TerrierIndex
-        return Retriever(self.index, wmodel="BM25")

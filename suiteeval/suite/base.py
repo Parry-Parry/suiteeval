@@ -6,6 +6,7 @@ from ir_datasets import Dataset
 from ir_measures import nDCG, Measure, parse_measure, parse_trec_measure
 import pandas as pd
 import pyterrier as pt
+from pyterrier import Transformer
 import logging
 
 
@@ -268,7 +269,7 @@ class Suite(ABC, metaclass=SuiteMeta):
     ) -> pd.DataFrame:
         assert pipelines or (
             ranking_generators
-        ), "You must provide either pipelines or both ranking_generators and indexing_generators."
+        ), "You must provide either pipelines or ranking_generators."
         if len(pipelines) > 5 and baseline is not None:
             logging.warning(
                 "Baseline is set with several pipelines, this may take a while."
