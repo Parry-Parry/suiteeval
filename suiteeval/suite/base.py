@@ -8,7 +8,15 @@ import pandas as pd
 import pyterrier as pt
 from pyterrier import Transformer
 import logging
+from suiteeval.context import DatasetContext
 
+"""
+TODO:
+    * metatdata and measures by dataset
+    * instatiate generator context from irds object
+        * pass into coerce_pipelines
+    * Allow pipeline coercion to yeild multiple pipelines per generator
+"""
 
 class SuiteMeta(type):
     """
@@ -140,12 +148,18 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         Checks for recommended measures in the metadata or optionally the dataset documentation.
         """
-        if self._measures is not None:
-            return
-
         if "official_measures" in metadata:
             # If the metadata has official measures, use those
             self._measures = self.parse_measures(metadata["official_measures"])
+            return
+
+        if any(ds_id in metadata for ds_id in self._datasets):
+            # If any dataset in _datasets has metadata, use that
+            for ds_id, ds_metadata in metadata.items():
+                if ds_id in self._datasets:
+                    self._measures[ds_id] = self.parse_measures(
+                        ds_metadata.get("official_measures", [])
+                    )
             return
 
         for ds_id, ds in self._datasets.items():
@@ -154,10 +168,10 @@ class Suite(ABC, metaclass=SuiteMeta):
                 dataset = irds.load(ds)
                 documentation = dataset.documentation()
                 if hasattr(documentation, "official_measures"):
-                    self._measures = self.parse_measures(
+                    self._measures[ds_id] = self.parse_measures(
                         documentation["official_measures"]
                     )
-                    break
+
             except Exception as e:
                 logging.warning(f"Failed to load measures for dataset {ds_id}: {e}")
                 pass
@@ -165,28 +179,16 @@ class Suite(ABC, metaclass=SuiteMeta):
             logging.warning(
                 "No measures defined for this suite. Defaulting to nDCG@10."
             )
-            self._measures = [nDCG @ 10]
+            self._measures = [nDCG@10]
 
     def coerce_pipelines(
-        self, dataset: Dataset, pipeline_generators: Sequence[callable]
+        self, context: DatasetContext, pipeline_generators: Sequence[callable]
     ) -> Generator[Transformer]:
         """
         Coerces indexing and ranking generators to pipelines.
         """
-
-        def doc_iterator():
-            for doc in dataset.documents_iter():
-                yield {"docno": doc["doc_id"], "text": doc["text"]}
-
         for gen in pipeline_generators:
-            yield gen(doc_iterator())
-
-    @cached_property
-    def measures(self, dataset) -> List[Measure]:
-        """
-        Returns the list of measures that this suite uses.
-        """
-        return self._measures
+            yield gen(context.doc_iter())
 
     @cache
     def get_measures(self, dataset) -> List[Measure]:
@@ -246,8 +248,7 @@ class Suite(ABC, metaclass=SuiteMeta):
 
     def __call__(
         self,
-        pipelines: Sequence[Any] = None,
-        ranking_generators: Sequence[callable] = None,
+        ranking_generators: Union[callable, Sequence[callable]],
         eval_metrics: Sequence[Any] = None,
         names: Optional[Sequence[str]] = None,
         subset: Optional[str] = None,
@@ -267,25 +268,17 @@ class Suite(ABC, metaclass=SuiteMeta):
         save_format: str = "trec",
         precompute_prefix: bool = False,
     ) -> pd.DataFrame:
-        assert pipelines or (
-            ranking_generators
-        ), "You must provide either pipelines or ranking_generators."
-        if len(pipelines) > 5 and baseline is not None:
-            logging.warning(
-                "Baseline is set with several pipelines, this may take a while."
-            )
-
         results = []
         for ds_name, ds in self.datasets:
             if subset and ds_name != subset:
                 continue
+
             topics = self.get_topics(ds)
             qrels = self.get_qrels(ds)
-            if not pipelines:
-                pipelines = self.coerce_pipelines(ds, ranking_generators)
+            pipelines = self.coerce_pipelines(ds, ranking_generators)
             df = pt.Experiment(
                 pipelines=pipelines,
-                eval_metrics=eval_metrics or self.measures,
+                eval_metrics=eval_metrics or self.get_measures(ds_name),
                 topics=topics,
                 qrels=qrels,
                 perquery=perquery,

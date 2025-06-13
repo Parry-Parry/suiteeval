@@ -1,18 +1,26 @@
 import tempfile
 import shutil
-from abc import ABC, abstractmethod
 from typing import Any
-from pyterrier import Transformer
 
 
-class TemporaryIndex(ABC):
+class Temporary:
     """
-    Abstract base class for a temporary index context manager.
-    Subclasses must implement _create_index and _cleanup.
+    Class for a temporary index context manager.
     """
-
+    index_cls = None
+    index_kwargs = {}
     _dir = None
     index = None
+
+    def __init__(self, index_cls: Any, **index_kwargs):
+        """
+        Initialize the temporary index context manager.
+
+        :param index_cls: The class of the index to create.
+        :param index_kwargs: Additional keyword arguments for the index class.
+        """
+        self.index_cls = index_cls
+        self.index_kwargs = index_kwargs
 
     def __enter__(self):
         # Create temporary directory
@@ -22,21 +30,15 @@ class TemporaryIndex(ABC):
         return self.index
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Cleanup index and temporary directory
-        try:
-            if hasattr(self.index, "close"):
-                # Some index implementations may require explicit close
-                self.index.close()
-        finally:
-            self._cleanup(self._dir)
+        # Cleanup temporary directory
+        self._cleanup(self._dir)
 
-    @abstractmethod
     def _create_index(self, path: str) -> Any:
         """
         Instantiate and build the index in `path` using `model` on `documents`.
         Returns the index object.
         """
-        pass
+        return self.index_cls(path, **self.index_kwargs)
 
     def _cleanup(self, path: str):
         """
