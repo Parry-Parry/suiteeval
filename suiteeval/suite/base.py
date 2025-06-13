@@ -2,21 +2,16 @@ from abc import ABC
 from functools import cache, cached_property
 from typing import Dict, Generator, List, Optional, Any, Union, Sequence
 import ir_datasets as irds
-from ir_datasets import Dataset
 from ir_measures import nDCG, Measure, parse_measure, parse_trec_measure
 import pandas as pd
 import pyterrier as pt
 from pyterrier import Transformer
-import logging
+from logging import getLogger
+
 from suiteeval.context import DatasetContext
 
-"""
-TODO:
-    * metatdata and measures by dataset
-    * instatiate generator context from irds object
-        * pass into coerce_pipelines
-    * Allow pipeline coercion to yeild multiple pipelines per generator
-"""
+logging = getLogger(__name__)
+
 
 class SuiteMeta(type):
     """
@@ -84,12 +79,15 @@ class Suite(ABC, metaclass=SuiteMeta):
     _datasets: Union[List[str], Dict[str, str]] = {}
     _metadata: Dict[str, Any] = {}
     _measures: List[Measure] = None
+    __default_measures: List[Measure] = [nDCG@10]
 
     def __init__(self):
         """
         Initializes the suite.
         """
         self.coerce_measures(self._metadata)
+        if "description" in self._metadata:
+            self.__doc__ = self._metadata["description"]
         self.__post_init__()
 
     def __post_init__(self):
@@ -187,8 +185,29 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         Coerces indexing and ranking generators to pipelines.
         """
+        pipelines, names = [], []
         for gen in pipeline_generators:
-            yield gen(context.doc_iter())
+            _pipelines, *args = gen(context.doc_iter())
+            _names = None if len(args) == 0 else args[0]
+            if isinstance(_pipelines, Transformer):
+                # If the generator yields a single pipeline, yield it directly
+                pipelines.append(_pipelines)
+                if names:
+                    names.append(_names)
+            elif isinstance(pipelines, Sequence):
+                pipelines.extend(_pipelines)
+                if _names:
+                    names.extend(_names)
+            else:
+                raise ValueError(
+                    f"Pipeline generator {gen} must yield a Transformer or a sequence of Transformers."
+                )
+        if not pipelines:
+            raise ValueError(
+                "No pipelines generated. Ensure your pipeline generators yield valid Transformers."
+            )
+        names = names or None
+        return pipelines, names
 
     @cache
     def get_measures(self, dataset) -> List[Measure]:
@@ -198,6 +217,8 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         if type(self._measures) is list:
             return self._measures
+        if dataset not in self._measures:
+            return self.__default_measures
         return self._measures[dataset]
 
     @cache
@@ -250,7 +271,6 @@ class Suite(ABC, metaclass=SuiteMeta):
         self,
         ranking_generators: Union[callable, Sequence[callable]],
         eval_metrics: Sequence[Any] = None,
-        names: Optional[Sequence[str]] = None,
         subset: Optional[str] = None,
         perquery: bool = False,
         batch_size: Optional[int] = None,
@@ -275,7 +295,7 @@ class Suite(ABC, metaclass=SuiteMeta):
 
             topics = self.get_topics(ds)
             qrels = self.get_qrels(ds)
-            pipelines = self.coerce_pipelines(ds, ranking_generators)
+            pipelines, names = self.coerce_pipelines(ds, ranking_generators)
             df = pt.Experiment(
                 pipelines=pipelines,
                 eval_metrics=eval_metrics or self.get_measures(ds_name),
@@ -303,29 +323,3 @@ class Suite(ABC, metaclass=SuiteMeta):
             results.append(df)
 
         return pd.concat(results, ignore_index=True) if results else pd.DataFrame()
-
-
-"""
-# ——— Example usage ———
-
-# Register a new suite (first call creates it; subsequent calls return the same instance)
-my_suite = Suite.register(
-    suite_name="MyPassageSuite",
-    datasets=[
-        "msmarco-passage",
-        "trec-core17"
-    ],
-    names=[
-        "MSMARCO",
-        "Core17"
-    ]
-)
-
-# Now `my_suite` is a singleton instance wrapping those two collections.
-# You can call it exactly like pt.Experiment, plus pipelines & eval_metrics:
-# results_df = my_suite(
-#     pipelines=[bm25, dpr],
-#     eval_metrics=["map", "ndcg"]
-# )
-
-"""
