@@ -277,21 +277,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         ranking_generators: Union[callable, Sequence[callable]],
         eval_metrics: Sequence[Any] = None,
         subset: Optional[str] = None,
-        perquery: bool = False,
-        batch_size: Optional[int] = None,
-        filter_by_qrels: bool = False,
-        filter_by_topics: bool = True,
-        baseline: Optional[int] = None,
-        test: str = "t",
-        correction: Optional[str] = None,
-        correction_alpha: float = 0.05,
-        highlight: Optional[str] = None,
-        round: Optional[Union[int, Dict[str, int]]] = None,
-        verbose: bool = False,
-        save_dir: Optional[str] = None,
-        save_mode: str = "warn",
-        save_format: str = "trec",
-        precompute_prefix: bool = False,
+        **experiment_kwargs: Dict[str, Any],
     ) -> pd.DataFrame:
         results = []
         for ds_name, ds in self.datasets:
@@ -301,29 +287,14 @@ class Suite(ABC, metaclass=SuiteMeta):
             topics = self.get_topics(ds)
             qrels = self.get_qrels(ds)
             context = DatasetContext(ds)
-            pipelines, names = self.coerce_pipelines(ds, ranking_generators)
+            pipelines, names = self.coerce_pipelines(context, ranking_generators)
             df = pt.Experiment(
                 pipelines=pipelines,
                 eval_metrics=eval_metrics or self.get_measures(ds_name),
                 topics=topics,
                 qrels=qrels,
-                perquery=perquery,
-                dataframe=True,
-                filter_by_qrels=filter_by_qrels,
-                filter_by_topics=filter_by_topics,
                 names=names,
-                batch_size=batch_size,
-                baseline=baseline,
-                test=test,
-                correction=correction,
-                correction_alpha=correction_alpha,
-                highlight=highlight,
-                round=round,
-                verbose=verbose,
-                save_dir=save_dir,
-                save_mode=save_mode,
-                save_format=save_format,
-                precompute_prefix=precompute_prefix,
+                **experiment_kwargs,
             )
             df["dataset"] = ds_name
             results.append(df)
