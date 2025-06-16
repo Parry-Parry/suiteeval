@@ -185,6 +185,11 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         Coerces indexing and ranking generators to pipelines.
         """
+        if type(pipeline_generators) is not Sequence:
+            assert callable(pipeline_generators), (
+                "pipeline_generators must be a callable or a sequence of callables."
+            )
+            pipeline_generators = [pipeline_generators]
         pipelines, names = [], []
         for gen in pipeline_generators:
             _pipelines, *args = gen(context.get_corpus_iter())
