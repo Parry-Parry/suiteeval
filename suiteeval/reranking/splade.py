@@ -11,6 +11,10 @@ if pyterrier_pisa_available():
 def SPLADE(
     ranking_pipeline, checkpoint: str = "naver/splade-cocondenser-ensembledistil"
 ):
+    if not pyterrier_pisa_available():
+        raise ImportError("pyterrier_pisa is required for SPLADE pipeline.")
+    if not pyterrier_splade_available():
+        raise ImportError("pyterrier_splade is required for SPLADE pipeline.")
     splade_model = Splade(model=checkpoint)
 
     def yield_pipe(context):

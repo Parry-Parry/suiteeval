@@ -6,6 +6,9 @@ if pyterrier_pisa_available():
 
 
 def BM25(ranking_pipeline):
+    if not pyterrier_pisa_available():
+        raise ImportError("pyterrier_pisa is required for BM25 pipeline.")
+
     def yeild_pipe(context):
         with Temporary(PisaIndex) as pisa_index:
             pisa_index.index(context.docs_iter())
