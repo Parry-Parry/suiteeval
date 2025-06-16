@@ -12,7 +12,7 @@ def HgfBiEncoder(
     hgf_be = HgfBiEncoder_base.from_pretrained(checkpoint)
 
     def yield_pipe(context):
-        flex_index = FlexIndex(context.path + '/bienc.flex', stemmer="none")
+        flex_index = FlexIndex(context.path + "/bienc.flex", stemmer="none")
         pipe = hgf_be >> flex_index.indexer()
         pipe.index(context.get_corpus_iter())
         yield hgf_be >> flex_index.np_retriever() >> context.text_loader() >> ranking_pipeline

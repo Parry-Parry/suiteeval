@@ -18,7 +18,7 @@ def SPLADE(
     splade_model = Splade(model=checkpoint)
 
     def yield_pipe(context):
-        splade_index = PisaIndex(context.path + '/index.splade.pisa', stemmer="none")
+        splade_index = PisaIndex(context.path + "/index.splade.pisa", stemmer="none")
         index_pipeline = splade_model.doc_encoder() >> splade_index
         index_pipeline.index(context.get_corpus_iter())
         yield (
