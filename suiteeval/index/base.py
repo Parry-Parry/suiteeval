@@ -12,22 +12,21 @@ class Temporary:
     _dir = None
     index = None
 
-    def __init__(self, index_cls: Any, documents: Iterable[Any], **index_kwargs):
+    def __init__(self, index_cls: Any, **index_kwargs):
         """
         Initialize the temporary index context manager.
 
         :param index_cls: The class of the index to create.
         :param index_kwargs: Additional keyword arguments for the index class.
         """
-        self.index_cls = index_cls\
-        self.documents = documents
+        self.index_cls = index_cls
         self.index_kwargs = index_kwargs
 
     def __enter__(self):
         # Create temporary directory
         self._dir = tempfile.mkdtemp()
         # Build the index
-        self.index = self._create_index(self.documents, self._dir)
+        self.index = self._create_index(self._dir)
         return self.index
 
     def __exit__(self, exc_type, exc_val, exc_tb):
