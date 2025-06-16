@@ -20,6 +20,4 @@ def yield_my_stages(context):
     yield bm25 >> context.text() >> monoelectra
 
 results = BEIR(yield_my_stages)
-
-
 ```
