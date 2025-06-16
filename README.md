@@ -5,7 +5,7 @@ Tools for running IR Evaluation Suites
 ### Example Usage
 
 ```python
-from suiteeval import BEIR, Temporary
+from suiteeval import BEIR
 from pyterrier_pisa import PisaIndex
 import pyterrier_dr
 import pyterrier_t5
@@ -13,12 +13,11 @@ import pyterrier_t5
 monot5 = pyterrier_t5.MonoT5ReRanker
 monoelectra = pyterrier_dr.ElectraScorer
 
-def yield_my_stages(context):
-  with Temporary(PisaIndex) as index:
+def system(context):
+    index = PisaIndex(context.path/'index.pisa')
     index.index(context.docs_iter())
-    bm25 = index.bm25()
-    yield bm25 >> context.text() >> monot5
-    yield bm25 >> context.text() >> monoelectra
+    return index.bm25() >> context.text_loader() >> monot5
+    # or return/yield multiple pipelines
 
-results = BEIR(yield_my_stages)
+results = BEIR(system)
 ```
