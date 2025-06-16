@@ -10,8 +10,8 @@ from suiteeval.suite import (
     MSMARCOPassage,
     NanoBEIR,
 )
-from suiteeval.index import Temporary as Temporary
 from suiteeval import reranking as reranking
+from suiteeval.context import DatasetContext
 
 __all__ = [
     "Suite",
@@ -20,6 +20,6 @@ __all__ = [
     "MSMARCODocument",
     "MSMARCOPassage",
     "NanoBEIR",
-    "Temporary",
     "reranking",
+    "DatasetContext",
 ]

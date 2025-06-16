@@ -10,10 +10,10 @@ def BM25(ranking_pipeline):
         raise ImportError("pyterrier_pisa is required for BM25 pipeline.")
 
     def yeild_pipe(context):
-        with Temporary(PisaIndex) as pisa_index:
-            pisa_index.index(context.docs_iter())
-            bm25 = pisa_index.bm25()
-            yield bm25 >> context.text() >> ranking_pipeline
+        pisa_index = PisaIndex(context.path + '/index.pisa', stemmer="none")
+        pisa_index.index(context.get_corpus_iter())
+        bm25 = pisa_index.bm25()
+        yield bm25 >> context.text_loader() >> ranking_pipeline
 
     return yeild_pipe
 

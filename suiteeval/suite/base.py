@@ -187,7 +187,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         pipelines, names = [], []
         for gen in pipeline_generators:
-            _pipelines, *args = gen(context.doc_iter())
+            _pipelines, *args = gen(context.get_corpus_iter())
             _names = None if len(args) == 0 else args[0]
             if isinstance(_pipelines, Transformer):
                 # If the generator yields a single pipeline, yield it directly
