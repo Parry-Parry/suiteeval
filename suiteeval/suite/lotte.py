@@ -26,3 +26,5 @@ Lotte = Suite.register(
         "description": "LoTTE (Long-Tail Topic-stratified Evaluation) is a set of test collections focused on out-of-domain evaluation. It consists of data from several StackExchanges, with relevance assumed by either by upvotes (at least 1) or being selected as the accepted answer by the question's author.",
     },
 )
+
+__all__ = ["Lotte"]

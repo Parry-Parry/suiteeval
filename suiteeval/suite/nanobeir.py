@@ -27,3 +27,5 @@ NanoBEIR = Suite.register(
         "description": "Nano Beir is a smaller version (max 50 queries per benchmark) of the Beir suite of benchmarks to test zero-shot transfer.",
     },
 )
+
+__all__ = ["NanoBEIR"]

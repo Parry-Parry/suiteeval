@@ -31,3 +31,5 @@ MSMARCOPassage = Suite.register(
         "description": "MS MARCO Passage datasets for evaluating retrieval systems on passage-level tasks.",
     },
 )
+
+__all__ = ["MSMARCODocument", "MSMARCOPassage"]

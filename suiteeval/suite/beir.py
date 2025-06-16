@@ -120,3 +120,6 @@ class BEIR(Suite):
         results = pd.concat([not_cqadupstack, cqadupstack], ignore_index=True)
 
         return results
+
+
+__all__ = ["BEIR"]
