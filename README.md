@@ -14,7 +14,8 @@ monot5 = pyterrier_t5.MonoT5ReRanker
 monoelectra = pyterrier_dr.ElectraScorer
 
 def yield_my_stages(context):
-  with Temporary(PisaIndex, context.docs_iter()) as index:
+  with Temporary(PisaIndex) as index:
+    index.index(context.docs_iter())
     bm25 = index.bm25()
     yield bm25 >> context.text() >> monot5
     yield bm25 >> context.text() >> monoelectra
