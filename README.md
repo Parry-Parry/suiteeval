@@ -10,8 +10,8 @@ from pyterrier_pisa import PisaIndex
 import pyterrier_dr
 import pyterrier_t5
 
-monot5 = pyterrier_t5.MonoT5ReRanker
-monoelectra = pyterrier_dr.ElectraScorer
+monot5 = pyterrier_t5.MonoT5ReRanker()
+monoelectra = pyterrier_dr.ElectraScorer()
 
 def systems(context):
     index = PisaIndex(context.path + "/index.pisa")
