@@ -27,7 +27,6 @@ def test_dataset_text_lookup_adds_text_column():
     # bypass __init__ to set dataset
     context = object.__new__(DatasetContext)
     context.dataset = ds
-    context.text_field = None
     lookup = context.text_loader()
 
     df = pd.DataFrame({"docno": ["d1", "d2"]})
