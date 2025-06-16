@@ -7,6 +7,7 @@ class Temporary:
     """
     Class for a temporary index context manager.
     """
+
     index_cls = None
     index_kwargs = {}
     _dir = None

@@ -11,6 +11,7 @@ def BM25(ranking_pipeline):
             pisa_index.index(context.docs_iter())
             bm25 = pisa_index.bm25()
             yield bm25 >> context.text() >> ranking_pipeline
+
     return yeild_pipe
 
 

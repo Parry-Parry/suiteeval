@@ -22,7 +22,10 @@ class DatasetContext:
 
     def docs_iter(self):
         for doc in self.dataset.docs:
-            yield {"docno": doc.doc_id, "text": getattr(doc, self.text_field, doc.default_text())}
+            yield {
+                "docno": doc.doc_id,
+                "text": getattr(doc, self.text_field, doc.default_text()),
+            }
 
 
 class DatasetTextLookup:
@@ -41,8 +44,14 @@ class DatasetTextLookup:
     def get_many_docs(self, doc_ids: list) -> dict:
         docs = self.doc_store.get_many(doc_ids)
         if docs is None:
-            raise KeyError(f"Documents {doc_ids} not found in dataset {self.dataset.id}.")
-        return {doc.doc_id: getattr(doc, self.text_field, doc.default_text()) for doc in docs if doc is not None}
+            raise KeyError(
+                f"Documents {doc_ids} not found in dataset {self.dataset.id}."
+            )
+        return {
+            doc.doc_id: getattr(doc, self.text_field, doc.default_text())
+            for doc in docs
+            if doc is not None
+        }
 
     def __call__(self, results: pd.DataFrame) -> str:
         doc_ids = results["docno"].unique().tolist()
@@ -50,5 +59,6 @@ class DatasetTextLookup:
 
         results["text"] = results["docno"].map(doc_texts)
         return results
+
 
 __all__ = ["DatasetContext"]

@@ -79,7 +79,7 @@ class Suite(ABC, metaclass=SuiteMeta):
     _datasets: Union[List[str], Dict[str, str]] = {}
     _metadata: Dict[str, Any] = {}
     _measures: List[Measure] = None
-    __default_measures: List[Measure] = [nDCG@10]
+    __default_measures: List[Measure] = [nDCG @ 10]
 
     def __init__(self):
         """
@@ -177,7 +177,7 @@ class Suite(ABC, metaclass=SuiteMeta):
             logging.warning(
                 "No measures defined for this suite. Defaulting to nDCG@10."
             )
-            self._measures = [nDCG@10]
+            self._measures = [nDCG @ 10]
 
     def coerce_pipelines(
         self, context: DatasetContext, pipeline_generators: Sequence[callable]
