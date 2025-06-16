@@ -1,4 +1,3 @@
-from suiteeval.index import Temporary
 from suiteeval._optional import pyterrier_pisa_available, pyterrier_splade_available
 
 if pyterrier_splade_available():

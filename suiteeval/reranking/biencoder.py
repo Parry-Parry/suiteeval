@@ -1,6 +1,5 @@
 from pyterrier_dr import HgfBiEncoder as HgfBiEncoder_base, FlexIndex
 from suiteeval._optional import pyterrier_dr_available
-from suiteeval.index import Temporary
 
 
 def HgfBiEncoder(
