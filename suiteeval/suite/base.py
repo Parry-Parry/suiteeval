@@ -295,6 +295,7 @@ class Suite(ABC, metaclass=SuiteMeta):
 
             topics = self.get_topics(ds)
             qrels = self.get_qrels(ds)
+            context = DatasetContext(ds)
             pipelines, names = self.coerce_pipelines(ds, ranking_generators)
             df = pt.Experiment(
                 pipelines=pipelines,

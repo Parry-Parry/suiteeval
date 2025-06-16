@@ -18,19 +18,19 @@ class DatasetContext:
         Returns a DatasetTextLookup instance for retrieving document texts.
         If text_field is None, defaults to the document's default text.
         """
-        return DatasetTextLookup(text_field=text_field)
+        return DatasetTextLookup(self.dataset, text_field)
 
     def docs_iter(self):
         for doc in self.dataset.docs:
-            yield {"docno": doc.doc_id, "text": doc.default_text()}
+            yield {"docno": doc.doc_id, "text": getattr(doc, self.text_field, doc.default_text())}
 
 
 class DatasetTextLookup:
     dataset: irds.Dataset
+    text_field: str = None
 
-    def __init__(self, text_field: str = None):
+    def __init__(self):
         self.doc_store = self.dataset.doc_store()
-        self.text_field = text_field
 
     def get_doc(self, doc_id: str) -> str:
         doc = self.doc_store.get(doc_id)
@@ -50,3 +50,5 @@ class DatasetTextLookup:
 
         results["text"] = results["docno"].map(doc_texts)
         return results
+
+__all__ = ["DatasetContext"]
