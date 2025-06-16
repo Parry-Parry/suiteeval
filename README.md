@@ -4,7 +4,7 @@ Tools for running IR Evaluation Suites
 
 ### Example Usage
 
-```
+```python
 from suiteeval import BEIR, Temporary
 from pyterrier_pisa import PisaIndex
 import pyterrier_dr
