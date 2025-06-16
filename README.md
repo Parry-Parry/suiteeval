@@ -13,20 +13,12 @@ import pyterrier_t5
 monot5 = pyterrier_t5.MonoT5ReRanker
 monoelectra = pyterrier_dr.ElectraScorer
 
-<<<<<<< HEAD
-def yield_my_stages(context):
+def systems(context):
     index = PisaIndex(context.path + "/index.pisa")
     index.index(context.get_corpus_iter())
     bm25 = index.bm25()
     yield bm25 >> context.text_loader() >> monot5, "BM25 >> monoT5"
     yield bm25 >> context.text_loader() >> monoelectra, "BM25 >> monoELECTRA"
-=======
-def system(context):
-    index = PisaIndex(context.path/'index.pisa')
-    index.index(context.docs_iter())
-    return index.bm25() >> context.text_loader() >> monot5
-    # or return/yield multiple pipelines
->>>>>>> 75d9681db44e8092d1f42e5b31ec4a2c53ef1010
 
-results = BEIR(system)
+results = BEIR(systems)
 ```
