@@ -5,10 +5,6 @@ import pyterrier as pt
 
 from suiteeval.suite.base import Suite
 
-# Ensure PyTerrier is initialized
-if not pt.started():
-    pt.init()
-
 VaswaniSuite = Suite.register(
     "vaswani",
     datasets=["vaswani"],
