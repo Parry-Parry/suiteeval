@@ -1,6 +1,7 @@
-from pyterrier_dr import HgfBiEncoder as HgfBiEncoder_base, FlexIndex
 from suiteeval._optional import pyterrier_dr_available
 
+if pyterrier_dr_available():
+    from pyterrier_dr import HgfBiEncoder as HgfBiEncoder_base, FlexIndex
 
 def HgfBiEncoder(
     ranking_pipeline, checkpoint: str = "sentence-transformers/all-mpnet-base-v2"
