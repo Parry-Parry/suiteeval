@@ -1,6 +1,6 @@
-from abc import ABC
+from abc import ABCMeta, ABC
 from functools import cache, cached_property
-from typing import Dict, Generator, List, Optional, Any, Union, Sequence
+from typing import Dict, Generator, List, Optional, Any, Tuple, Union, Sequence
 import ir_datasets as irds
 from ir_measures import nDCG, Measure, parse_measure, parse_trec_measure
 import pandas as pd
@@ -13,7 +13,7 @@ from suiteeval.context import DatasetContext
 logging = getLogger(__name__)
 
 
-class SuiteMeta(type):
+class SuiteMeta(ABCMeta):
     """
     Metaclass for Suite:
 
@@ -37,7 +37,7 @@ class SuiteMeta(type):
         suite_name: str,
         datasets: List[str],
         names: Optional[List[str]] = None,
-        metadata: Optional[List[Dict[str, Any]]] = None,
+        metadata: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]] = None,
     ) -> "Suite":
         """
         Create (or retrieve) a Suite singleton that wraps the given datasets.
@@ -56,12 +56,39 @@ class SuiteMeta(type):
         if suite_name in mcs._classes:
             return mcs._classes[suite_name]()
 
-        # build the mapping name→dataset_id
-        ds_names = names or datasets
-        mapping = dict(zip(ds_names, datasets, metadata or [{}] * len(datasets)))
+        # build the dataset name → dataset_id mapping
+        ds_names    = names or datasets
+        dataset_map = dict(zip(ds_names, datasets))
 
-        # dynamically create a new subclass of Suite with the right _datasets
-        attrs = {"_datasets": mapping}
+        # normalize metadata: could be
+        #  • None            → no per‐dataset metadata
+        #  • list[dict]      → metadata[i] applies to ds_names[i]
+        #  • dict[str,dict]  → per‐dataset mapping (keys are names or IDs)
+        #  • dict[k,v] where v is NOT a dict → flat metadata for all
+        if metadata is None:
+            metadata_map = {name: {} for name in ds_names}
+
+        elif isinstance(metadata, list):
+            if len(metadata) != len(ds_names):
+                raise ValueError("`metadata` list must match number of datasets")
+            metadata_map = dict(zip(ds_names, metadata))
+
+        elif isinstance(metadata, dict):
+            # check if values are all non‐dict → treat as global metadata
+            if all(not isinstance(v, dict) for v in metadata.values()):
+                metadata_map = {name: metadata for name in ds_names}
+            else:
+                # assume user passed a per‐dataset dict
+                metadata_map = metadata
+
+        else:
+            raise ValueError(f"Unsupported metadata type: {type(metadata)}")
+
+        # now dynamically create the subclass with both mappings
+        attrs = {
+            "_datasets": dataset_map,
+            "_metadata": metadata_map
+        }
         new_cls = mcs(suite_name, (Suite,), attrs)
 
         # store class and return its singleton instance
@@ -149,18 +176,26 @@ class Suite(ABC, metaclass=SuiteMeta):
         if "official_measures" in metadata:
             # If the metadata has official measures, use those
             self._measures = self.parse_measures(metadata["official_measures"])
-            return
+            if not len(self._measures) == 0:
+                return
 
         if any(ds_id in metadata for ds_id in self._datasets):
             # If any dataset in _datasets has metadata, use that
+            self._measures = {}
             for ds_id, ds_metadata in metadata.items():
                 if ds_id in self._datasets:
                     self._measures[ds_id] = self.parse_measures(
-                        ds_metadata.get("official_measures", [])
+                        ds_metadata.get("official_measures", self.__default_measures)
                     )
-            return
+            if all(
+                isinstance(m, Measure) for m in self._measures.values()
+            ):
+                # If all measures are valid, return
+                return
 
         for ds_id, ds in self._datasets.items():
+            if self._measures is None:
+                self._measures = {}
             try:
                 # Try to load the dataset and its measures
                 dataset = irds.load(ds)
@@ -173,6 +208,16 @@ class Suite(ABC, metaclass=SuiteMeta):
             except Exception as e:
                 logging.warning(f"Failed to load measures for dataset {ds_id}: {e}")
                 pass
+
+        if any(not isinstance(m, Measure) for m in self._measures.values()):
+            for ds_id, measures in self._measures.items():
+                # if empty list or not at all default to nDCG@10 and warn
+                if not measures or not isinstance(measures, list):
+                    logging.warning(
+                        f"Dataset {ds_id} has no valid measures defined. Defaulting to nDCG@10."
+                    )
+                    self._measures[ds_id] = self.__default_measures
+
         if self._measures is None:
             logging.warning(
                 "No measures defined for this suite. Defaulting to nDCG@10."
@@ -181,7 +226,7 @@ class Suite(ABC, metaclass=SuiteMeta):
 
     def coerce_pipelines(
         self, context: DatasetContext, pipeline_generators: Sequence[callable]
-    ) -> Generator[Transformer]:
+    ) -> Tuple[List[Transformer], Optional[List[str]]]:
         """
         Coerces indexing and ranking generators to pipelines.
         """
@@ -226,35 +271,8 @@ class Suite(ABC, metaclass=SuiteMeta):
             return self.__default_measures
         return self._measures[dataset]
 
-    @cache
-    def get_topics(self, dataset) -> pd.DataFrame:
-        """
-        Returns the topics DataFrame for the given dataset.
-        Columns:
-            - qid: Query ID
-            - query: Query text
-        """
-        topics = pd.DataFrame(dataset.queries_iter()).rename(
-            columns={"query_id": "qid", "text": "query"}
-        )
-        return topics
-
-    @cache
-    def get_qrels(self, dataset) -> pd.DataFrame:
-        """
-        Returns the qrels DataFrame for the given dataset.
-        Columns:
-            - qid: Query ID
-            - docno: Document ID
-            - label: Relevance label
-        """
-        qrels = pd.DataFrame(dataset.qrels_iter()).rename(
-            columns={"query_id": "qid", "document_id": "docno", "relevance": "label"}
-        )
-        return qrels
-
-    @cached_property
-    def datasets(self) -> Generator[str, irds.Dataset, None]:
+    @property
+    def datasets(self) -> Generator[Tuple[str, pt.datasets.Dataset], None, None]:
         """
         Returns a generator yielding dataset names and their ir_datasets.Dataset instances.
         Yields:
@@ -263,10 +281,10 @@ class Suite(ABC, metaclass=SuiteMeta):
         if type(self._datasets) is list:
             # If _datasets is a list, assume they are dataset IDs
             for ds_id in self._datasets:
-                yield ds_id, irds.load(ds_id)
+                yield ds_id, pt.get_dataset(f"irds:{ds_id}")
         elif type(self._datasets) is dict:
             for name, ds_id in self._datasets.items():
-                yield name, irds.load(ds_id)
+                yield name, pt.get_dataset(f"irds:{ds_id}")
         else:
             raise ValueError(
                 "Suite _datasets must be a list or dict mapping names to dataset IDs."
@@ -284,12 +302,12 @@ class Suite(ABC, metaclass=SuiteMeta):
             if subset and ds_name != subset:
                 continue
 
-            topics = self.get_topics(ds)
-            qrels = self.get_qrels(ds)
+            topics = ds.get_topics()
+            qrels = ds.get_qrels()
             context = DatasetContext(ds)
             pipelines, names = self.coerce_pipelines(context, ranking_generators)
             df = pt.Experiment(
-                pipelines=pipelines,
+                pipelines,
                 eval_metrics=eval_metrics or self.get_measures(ds_name),
                 topics=topics,
                 qrels=qrels,

@@ -1,51 +1,64 @@
-import os
+# File: tests/unit/test_suite_base.py
 import pytest
 import pandas as pd
-import suiteeval
-from suiteeval import Suite
-from suiteeval._optional import (
-    pyterrier_available,
-    pyterrier_dr_available,
-    pyterrier_pisa_available,
-    pyterrier_splade_available,
+import pyterrier as pt
+
+from suiteeval.suite.base import Suite
+
+# Ensure PyTerrier is initialized
+if not pt.started():
+    pt.init()
+
+VaswaniSuite = Suite.register(
+    "vaswani",
+    datasets=["vaswani"],
+    metadata={
+        "description": "Vaswani is a dataset for evaluating retrieval systems on a variety of topics.",
+    },
 )
 
-# Dummy index class for testing Temporary
-class DummyIndex:
-    def __init__(self, path, **kwargs):
-        self.path = path
-        self.kwargs = kwargs
-        # create a marker file to verify directory creation
-        open(os.path.join(path, "marker.txt"), "w").close()
+@pytest.fixture(scope="module")
+def suite():
+    return VaswaniSuite
 
-def test_optional_dependency_flags_return_boolean():
-    assert isinstance(pyterrier_available(), bool)
-    assert isinstance(pyterrier_dr_available(), bool)
-    assert isinstance(pyterrier_pisa_available(), bool)
-    assert isinstance(pyterrier_splade_available(), bool)
+@pytest.fixture(scope="module")
+def vaswani_dataset():
+    # load the Vaswani dataset
+    return pt.get_dataset("irds:vaswani")
 
+def test_datasets_property_returns_dataset_instances(suite):
+    datasets = list(suite.datasets)
+    assert len(datasets) == 1
+    name, ds = datasets[0]
+    assert name == "vaswani"
 
-def test_reranking_exports():
-    from suiteeval import reranking
+class DummyTransformer(pt.Transformer):
+    def transform(self, inp):
+        # return an empty ranking DataFrame with standard columns
+        qids = inp['qid'].unique()
 
-    expected = {"BM25", "SPLADE", "HgfBiEncoder"}
-    assert set(reranking.__all__) == expected
+        output = {
+            'qid': [],
+            'docno': [],
+            'rank': [],
+            'score': [],
+        }
+        for qid in qids:
+            output['qid'].append(qid)
+            output['docno'].append('dummy_doc')
+            output['rank'].append(0)
+            output['score'].append(1.0)
+        return pd.DataFrame(output)
 
-
-def test_suite_singleton_behavior():
-    first = Suite.register("foo_suite", ["dataset/a"])
-    second = Suite.register("foo_suite", ["dataset/a"])
-    assert first is second
-
-
-def test_beir_empty_evaluation_returns_dataframe(monkeypatch):
-    from suiteeval.suite import BEIR
-
-    # Monkey-patch Experiment to avoid external calls
-    import pyterrier as pt
-    monkeypatch.setattr(pt, 'Experiment', lambda *args, **kwargs: pd.DataFrame())
-
-    suite = BEIR()
-    df = suite(pipelines=[], ranking_generators=[])
-    assert isinstance(df, pd.DataFrame)
-    assert df.empty
+def test_call_runs_experiment_and_returns_dataframe(suite):
+    ds_id, ds = list(suite.datasets)[0]
+    dummy = DummyTransformer()
+    def yield_pipe(context):
+        yield dummy
+    # Use the dummy transformer as a ranking generator
+    results = suite(ranking_generators=yield_pipe)
+    assert isinstance(results, pd.DataFrame)
+    assert 'dataset' in results.columns
+    # If not empty, all rows should have the same dataset name
+    if not results.empty:
+        assert results['dataset'].unique().tolist() == [ds_id]

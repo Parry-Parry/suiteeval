@@ -1,31 +1,45 @@
 import tempfile
-import pandas as pd
-import ir_datasets as irds
-from pyterrier.datasets._irds import IRDSTextLoader
+from typing import Union, List, Literal, Optional
+import pyterrier as pt
 
 
 class DatasetContext:
-    dataset: irds.Dataset
-    path: str = None
+    """
+    Holds both a PyTerrier Dataset and a filesystem path (for indexes, caches, etc.).
+    """
 
-    def __init__(self):
-        if self.path is None:
-            formatted_dataset = self.dataset.id.replace("/", "-")
-            self.path = tempfile.mkdtemp(suffix=f"-{formatted_dataset}")
-        self.doc_store = self.dataset.doc_store()
+    def __init__(
+        self,
+        dataset: pt.datasets.Dataset,
+        path: Optional[str] = None
+    ):
+        """
+        Args:
+            dataset: The pyterrier Dataset instance (must have `_irds_id`).
+            path:    Optional filesystem path to use; if omitted, a temp dir
+                     will be created for you.
+        """
+        self.dataset = dataset
+        if path is None:
+            formatted = self.dataset._irds_id.replace("/", "-")
+            self.path = tempfile.mkdtemp(suffix=f"-{formatted}")
+        else:
+            self.path = path
 
-    def text_loader(self, text_field: str = None):
+    def text_loader(
+        self, 
+        fields: Union[List[str], str, Literal['*']] = '*'
+    ):
         """
         Returns a IRDSTextLoader instance for retrieving document texts.
         """
-        return IRDSTextLoader(self.dataset, text_field)
+        return self.dataset.text_loader(fields=fields)
 
     def get_corpus_iter(self):
-        for doc in self.dataset.docs:
-            yield {
-                "docno": doc.doc_id,
-                "text": getattr(doc, self.text_field, doc.default_text()),
-            }
+        """
+        Returns an iterator over the corpus documents.
+        """
+        return self.dataset.get_corpus_iter()
 
 
 __all__ = ["DatasetContext"]
