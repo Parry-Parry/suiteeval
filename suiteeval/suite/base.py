@@ -1,5 +1,5 @@
 from abc import ABCMeta, ABC
-from functools import cache, cached_property
+from functools import cache
 from typing import Dict, Generator, List, Optional, Any, Tuple, Union, Sequence
 import ir_datasets as irds
 from ir_measures import nDCG, Measure, parse_measure, parse_trec_measure
