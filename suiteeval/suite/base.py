@@ -1,7 +1,9 @@
 from abc import ABCMeta, ABC
 from functools import cache
 from typing import Dict, Generator, List, Optional, Any, Tuple, Union, Sequence
-from collections.abc import Sequence as runtime_Sequence
+import builtins
+import inspect
+from collections.abc import Sequence as runtime_Sequence, Iterator
 from logging import getLogger
 
 import ir_datasets as irds
@@ -228,41 +230,88 @@ class Suite(ABC, metaclass=SuiteMeta):
             self._measures = [nDCG @ 10]
 
     def coerce_pipelines(
-        self, context: DatasetContext, pipeline_generators: Sequence[callable]
-    ) -> Tuple[List[Transformer], Optional[List[str]]]:
+                        self,
+                        context: DatasetContext,
+                        pipeline_generators: "runtime_Sequence|builtins.callable",
+                    ) -> Tuple[List[Transformer], Optional[List[str]]]:
         """
         Coerces indexing and ranking generators to pipelines.
         """
-        if not isinstance(pipeline_generators, runtime_Sequence):
-            if not callable(pipeline_generators):
+        if not isinstance(pipeline_generators, runtime_Sequence) or isinstance(pipeline_generators, (str, bytes)):
+            if not builtins.callable(pipeline_generators):
                 raise TypeError("pipeline_generators must be a callable or a sequence of callables.")
-            pipeline_generators = [pipeline_generators]
+            gens = [pipeline_generators]
         else:
-            if not all(callable(f) for f in pipeline_generators):
+            if not all(builtins.callable(f) for f in pipeline_generators):
                 raise TypeError("All elements of pipeline_generators must be callable.")
-        pipelines, names = [], []
-        for gen in pipeline_generators:
-            _pipelines, *args = gen(context.get_corpus_iter())
-            _names = None if len(args) == 0 else args[0]
-            if isinstance(_pipelines, Transformer):
-                # If the generator yields a single pipeline, yield it directly
-                pipelines.append(_pipelines)
-                if names:
-                    names.append(_names)
-            elif isinstance(pipelines, Sequence):
-                pipelines.extend(_pipelines)
-                if _names:
-                    names.extend(_names)
+            gens = list(pipeline_generators)
+        pipelines: List[Transformer] = []
+        names: List[str] = []
+
+        for gen in gens:
+            out = gen(context)  # pass DatasetContext, not corpus iterator
+
+            # Case 1: generator/iterator of (pipeline, name) pairs
+            if inspect.isgenerator(out) or isinstance(out, Iterator):
+                pairs = list(out)
+                for item in pairs:
+                    if isinstance(item, tuple) and len(item) == 2:
+                        p, nm = item
+                    else:
+                        # allow yielding a bare Transformer (name becomes None)
+                        p, nm = item, None
+                    if isinstance(p, Transformer):
+                        pipelines.append(p)
+                        names.append(nm if isinstance(nm, str) else None)
+                    elif isinstance(p, runtime_Sequence) and all(isinstance(pi, Transformer) for pi in p):
+                        pipelines.extend(p)
+                        # broadcast name if string; else append Nones
+                        if isinstance(nm, str):
+                            names.extend([nm] * len(p))
+                        elif isinstance(nm, runtime_Sequence):
+                            names.extend(list(nm))
+                        else:
+                            names.extend([None] * len(p))
+                    else:
+                        raise ValueError(
+                            f"Pipeline generator {gen} yielded an invalid item: {type(p)}"
+                        )
+                continue
+
+            # Case 2: return-style — (pipelines, names?) or a single Transformer / sequence
+            if isinstance(out, tuple):
+                _pipelines, *_rest = out
+                _names = None if not _rest else _rest[0]
             else:
+                _pipelines, _names = out, None
+
+            # Normalize _pipelines
+            if isinstance(_pipelines, Transformer):
+                pipelines.append(_pipelines)
+                names.append(_names if isinstance(_names, str) else None)
+            elif inspect.isgenerator(_pipelines) or isinstance(_pipelines, Iterator):
+                _pipelines = list(_pipelines)
+
+            if isinstance(_pipelines, runtime_Sequence) and all(isinstance(pi, Transformer) for pi in _pipelines):
+                pipelines.extend(_pipelines)
+                if isinstance(_names, str):
+                    names.extend([_names] * len(_pipelines))
+                elif isinstance(_names, runtime_Sequence):
+                    names.extend(list(_names))
+                else:
+                    names.extend([None] * len(_pipelines))
+            elif not isinstance(_pipelines, Transformer):
                 raise ValueError(
-                    f"Pipeline generator {gen} must yield a Transformer or a sequence of Transformers."
+                    f"Pipeline generator {gen} must return or yield a Transformer "
+                    f"or a sequence of Transformers."
                 )
+
         if not pipelines:
-            raise ValueError(
-                "No pipelines generated. Ensure your pipeline generators yield valid Transformers."
-            )
-        names = names or None
-        return pipelines, names
+            raise ValueError("No pipelines generated. Ensure your generators produce valid Transformers.")
+
+        # Collapse names to None if all missing
+        final_names = None if not any(names) else [nm if nm is not None else f"pipeline_{i}" for i, nm in enumerate(names)]
+        return pipelines, final_names
 
     @cache
     def get_measures(self, dataset) -> List[Measure]:
