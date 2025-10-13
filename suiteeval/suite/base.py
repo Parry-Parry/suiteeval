@@ -319,6 +319,8 @@ class Suite(ABC, metaclass=SuiteMeta):
             df["dataset"] = ds_name
             results.append(df)
 
+        results = pd.concat(results, ignore_index=True) if results else pd.DataFrame()
+
         perquery = experiment_kwargs.get("perquery", False)
         if not perquery:
             gmean_rows = []
@@ -334,4 +336,4 @@ class Suite(ABC, metaclass=SuiteMeta):
             gmean_df["Dataset"] = "Overall"
             results = pd.concat([results, gmean_df], ignore_index=True)
 
-        return pd.concat(results, ignore_index=True) if results else pd.DataFrame()
+        return results
