@@ -27,7 +27,7 @@ class DatasetContext:
             self.path = path
 
     def text_loader(
-        self, 
+        self,
         fields: Union[List[str], str, Literal['*']] = '*'
     ):
         """

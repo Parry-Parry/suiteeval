@@ -1,14 +1,16 @@
 from abc import ABCMeta, ABC
 from functools import cache
 from typing import Dict, Generator, List, Optional, Any, Tuple, Union, Sequence
+from logging import getLogger
+
 import ir_datasets as irds
 from ir_measures import nDCG, Measure, parse_measure, parse_trec_measure
 import pandas as pd
 import pyterrier as pt
 from pyterrier import Transformer
-from logging import getLogger
 
 from suiteeval.context import DatasetContext
+from suiteeval.utility import geometric_mean
 
 logging = getLogger(__name__)
 
@@ -316,5 +318,20 @@ class Suite(ABC, metaclass=SuiteMeta):
             )
             df["dataset"] = ds_name
             results.append(df)
+
+        perquery = experiment_kwargs.get("perquery", False)
+        if not perquery:
+            gmean_rows = []
+            for (dataset, name), group in results.groupby(["dataset", "name"]):
+                row = {"dataset": dataset, "name": name}
+                for measure in self.measures:
+                    if measure in group:
+                        values = group[measure].values
+                        gmean = geometric_mean(values)
+                        row[measure] = gmean
+                gmean_rows.append(row)
+            gmean_df = pd.DataFrame(gmean_rows)
+            gmean_df["Dataset"] = "Overall"
+            results = pd.concat([results, gmean_df], ignore_index=True)
 
         return pd.concat(results, ignore_index=True) if results else pd.DataFrame()

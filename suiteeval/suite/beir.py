@@ -1,7 +1,10 @@
+from typing import Any, Sequence, Optional, Union, Dict
+
 from ir_measures import nDCG
 from suiteeval.suite.base import Suite
-from typing import Any, Sequence, Optional, Union, Dict
 import pandas as pd
+
+from suiteeval.utility import geometric_mean
 
 datasets = [
     "beir/arguana",
@@ -118,6 +121,20 @@ class BEIR(Suite):
             cqadupstack = cqadupstack.groupby(["dataset", "name"]).mean().reset_index()
         cqadupstack["dataset"] = "beir/cqadupstack"
         results = pd.concat([not_cqadupstack, cqadupstack], ignore_index=True)
+
+        if not perquery:
+            gmean_rows = []
+            for (dataset, name), group in results.groupby(["dataset", "name"]):
+                row = {"dataset": dataset, "name": name}
+                for measure in self.measures:
+                    if measure in group:
+                        values = group[measure].values
+                        gmean = geometric_mean(values)
+                        row[measure] = gmean
+                gmean_rows.append(row)
+            gmean_df = pd.DataFrame(gmean_rows)
+            gmean_df["Dataset"] = "Overall"
+            results = pd.concat([results, gmean_df], ignore_index=True)
 
         return results
 
