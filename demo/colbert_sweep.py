@@ -86,7 +86,7 @@ def main(
             f"BM25 >> ColBERT |size={pisa_size_b}| ({pisa_size_mb:.1f} MB)"
         )
 
-    result = BEIR(pipelines)
+    result = BEIR()(pipelines)
 
     # Identify the label column that contains our parse marker
     label_col = None
