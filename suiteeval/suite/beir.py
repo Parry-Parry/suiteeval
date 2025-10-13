@@ -61,7 +61,6 @@ class BEIR(Suite):
         self,
         pipelines: Sequence[Any] = None,
         eval_metrics: Sequence[Any] = None,
-        names: Optional[Sequence[str]] = None,
         subset: Optional[str] = None,
         perquery: bool = False,
         batch_size: Optional[int] = None,
@@ -82,7 +81,6 @@ class BEIR(Suite):
         results = super().__call__(
             ranking_generators=pipelines,
             eval_metrics=eval_metrics,
-            names=names,
             subset=subset,
             perquery=perquery,
             batch_size=batch_size,
