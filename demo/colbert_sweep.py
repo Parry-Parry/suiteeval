@@ -45,11 +45,9 @@ def _mb(x_bytes: int) -> float:
 @click.command()
 @click.option("--save-path", type=str, required=True, help="Path to save the CSV results.")
 @click.option("--checkpoint", type=str, default="bert-base-uncased", help="Checkpoint for ColBERT.")
-@click.option("--batch-size", type=int, default=512, help="Batch size for processing.")
 def main(
         save_path: str,
         checkpoint: str = "bert-base-uncased",
-        batch_size: int = 512,
         ):
     def pipelines(context: DatasetContext):
         # Paths
@@ -68,7 +66,7 @@ def main(
         # ColBERT end-to-end pipeline
         colbert = ColBERTFactory(checkpoint, colbert_dir, "colbert")
         yield (
-            colbert.end_to_end(batch_size=batch_size),
+            colbert.end_to_end(),
             f"ColBERT end-to-end |size={colbert_size_b}| ({colbert_size_mb:.1f} MB)"
         )
 
@@ -82,7 +80,7 @@ def main(
 
         # BM25 >> ColBERT rescoring pipeline
         yield (
-            pisa_index.bm25() >> context.text_loader() >> colbert.text_scorer(batch_size=batch_size),
+            pisa_index.bm25() >> context.text_loader() >> colbert.text_scorer(),
             f"BM25 >> ColBERT |size={pisa_size_b}| ({pisa_size_mb:.1f} MB)"
         )
 

@@ -27,5 +27,5 @@ dependencies = {file = ["requirements.txt"]}
 exclude = ["tests"]
 
 [project.urls]
-Repository = "https://github.com/seanmacavaney/suiteeval"
-"Bug Tracker" = "https://github.com/seanmacavaney/suiteeval/issues"
+Repository = "https://github.com/mrparryparry/suiteeval"
+"Bug Tracker" = "https://github.com/mrparryparry/suiteeval/issues"
