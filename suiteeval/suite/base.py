@@ -1,6 +1,7 @@
 from abc import ABCMeta, ABC
 from functools import cache
 from typing import Dict, Generator, List, Optional, Any, Tuple, Union, Sequence
+from collections.abc import Sequence as runtime_Sequence
 from logging import getLogger
 
 import ir_datasets as irds
@@ -232,11 +233,13 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         Coerces indexing and ranking generators to pipelines.
         """
-        if type(pipeline_generators) is not Sequence:
-            assert callable(
-                pipeline_generators
-            ), "pipeline_generators must be a callable or a sequence of callables."
+        if not isinstance(pipeline_generators, runtime_Sequence):
+            if not callable(pipeline_generators):
+                raise TypeError("pipeline_generators must be a callable or a sequence of callables.")
             pipeline_generators = [pipeline_generators]
+        else:
+            if not all(callable(f) for f in pipeline_generators):
+                raise TypeError("All elements of pipeline_generators must be callable.")
         pipelines, names = [], []
         for gen in pipeline_generators:
             _pipelines, *args = gen(context.get_corpus_iter())
