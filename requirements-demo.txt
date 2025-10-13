@@ -1,2 +1,3 @@
 pyterrier_colbert @ git+https://github.com/terrierteam/pyterrier_colbert.git
 faiss-gpu
+click
