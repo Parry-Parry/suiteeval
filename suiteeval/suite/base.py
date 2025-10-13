@@ -237,7 +237,6 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         Coerces indexing and ranking generators to pipelines.
         """
-        breakpoint()
         # Normalize: accept a single callable or a sequence of callables.
         if not isinstance(pipeline_generators, runtime_Sequence) or isinstance(pipeline_generators, (str, bytes)):
             if not builtins.callable(pipeline_generators):
@@ -250,8 +249,6 @@ class Suite(ABC, metaclass=SuiteMeta):
 
         pipelines: List[Transformer] = []
         names: List[Optional[str]] = []
-
-        breakpoint()
 
         for gen in gens:
             out = gen(context)  # pass DatasetContext, not corpus iterator
@@ -356,6 +353,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         **experiment_kwargs: Dict[str, Any],
     ) -> pd.DataFrame:
         results = []
+        breakpoint()
         for ds_name, ds in self.datasets:
             if subset and ds_name != subset:
                 continue
