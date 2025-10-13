@@ -57,7 +57,7 @@ def main(
         pisa_dir = f"{context.path}/index.pisa"
 
         # --- ColBERT indexing ---
-        colbert_indexer = ColBERTIndexer(checkpoint, colbert_dir, "colbert")
+        colbert_indexer = ColBERTIndexer(checkpoint, colbert_dir, "colbert", 10000)
         colbert_indexer.index(context.get_corpus_iter())
         del colbert_indexer  # free memory before ranking
 
