@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+from typing import Union
 
 import click
 import pyterrier as pt
@@ -13,7 +14,7 @@ from suiteeval.context import DatasetContext
 from suiteeval import BEIR
 
 
-def _dir_size_bytes(path: str | os.PathLike) -> int:
+def _dir_size_bytes(path: Union[str, os.PathLike]) -> int:
     """Return total size in bytes for a file or directory (recursive)."""
     p = Path(path)
     if not p.exists():
