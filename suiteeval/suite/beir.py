@@ -126,7 +126,7 @@ class BEIR(Suite):
             gmean_rows = []
             for (dataset, name), group in results.groupby(["dataset", "name"]):
                 row = {"dataset": dataset, "name": name}
-                for measure in self.measures:
+                for measure in self._measures:
                     if measure in group:
                         values = group[measure].values
                         gmean = geometric_mean(values)
