@@ -2,6 +2,9 @@ from pathlib import Path
 import os
 
 import click
+import pyterrier as pt
+if not pt.started():
+    pt.init()
 from pyterrier_colbert.indexing import ColBERTIndexer
 from pyterrier_colbert.ranking import ColBERTFactory
 from pyterrier_pisa import PisaIndex
