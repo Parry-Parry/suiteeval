@@ -6,8 +6,7 @@ import click
 import pyterrier as pt
 if not pt.started():
     pt.init()
-from pyterrier_colbert.indexing import ColBERTIndexer
-from pyterrier_colbert.ranking import ColBERTFactory
+from pyterrier_dr import HgfBiEncoder
 from pyterrier_pisa import PisaIndex
 
 from suiteeval.context import DatasetContext
@@ -45,30 +44,29 @@ def _mb(x_bytes: int) -> float:
 
 @click.command()
 @click.option("--save-path", type=str, required=True, help="Path to save the CSV results.")
-@click.option("--checkpoint", type=str, default="bert-base-uncased", help="Checkpoint for ColBERT.")
+@click.option("--checkpoint", type=str, default="bert-base-uncased", help="Checkpoint for biencoder.")
 def main(
         save_path: str,
         checkpoint: str = "bert-base-uncased",
         ):
     def pipelines(context: DatasetContext):
         # Paths
-        colbert_dir = f"{context.path}/colbert_index"
+        biencoder_dir = f"{context.path}/index.flex"
         pisa_dir = f"{context.path}/index.pisa"
 
-        # --- ColBERT indexing ---
-        colbert_indexer = ColBERTIndexer(checkpoint, colbert_dir, "colbert", 64)
-        colbert_indexer.index(context.get_corpus_iter())
-        del colbert_indexer  # free memory before ranking
+        # --- biencoder indexing ---
+        flex_index = FlexIndex(biencoder_dir)
+        biencoder = HgfBiEncoder.from_pretrained(checkpoint, batch_size=256, max_length=512)
+        e2e_pipe = biencoder >> flex_index
+        e2e_pipe.index(context.get_corpus_iter())
 
-        # Compute on-disk size for ColBERT index
-        colbert_size_b = _dir_size_bytes(colbert_dir)
-        colbert_size_mb = _mb(colbert_size_b)
+        # Compute on-disk size for biencoder index
+        biencoder_size_b = _dir_size_bytes(biencoder_dir)
+        biencoder_size_mb = _mb(biencoder_size_b)
 
-        # ColBERT end-to-end pipeline
-        colbert = ColBERTFactory(checkpoint, colbert_dir, "colbert")
         yield (
-            colbert.end_to_end(),
-            f"ColBERT end-to-end |size={colbert_size_b}| ({colbert_size_mb:.1f} MB)"
+            e2e_pipe,
+            f"biencoder end-to-end |size={biencoder_size_b}| ({biencoder_size_mb:.1f} MB)"
         )
 
         # --- PISA (BM25) indexing ---
@@ -79,10 +77,10 @@ def main(
         pisa_size_b = _dir_size_bytes(pisa_dir)
         pisa_size_mb = _mb(pisa_size_b)
 
-        # BM25 >> ColBERT rescoring pipeline
+        # BM25 >> biencoder rescoring pipeline
         yield (
-            pisa_index.bm25() >> context.text_loader() >> colbert.text_scorer(),
-            f"BM25 >> ColBERT |size={pisa_size_b}| ({pisa_size_mb:.1f} MB)"
+            pisa_index.bm25() >> context.text_loader() >> biencoder,
+            f"BM25 >> biencoder |size={pisa_size_b}| ({pisa_size_mb:.1f} MB)"
         )
 
     result = BEIR()(pipelines)
