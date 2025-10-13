@@ -18,7 +18,7 @@ def main(
         ):
     def pipelines(context: DatasetContext):
         colbert_indexer = ColBERTIndexer(checkpoint, context.path + "/colbert_index", "colbert")
-        pisa_index = PisaIndex(context.path + "/index.pisa", stemmer="none")
+        pisa_index = PisaIndex(context.path + "/index.pisa")
 
         colbert_indexer.index(context.get_corpus_iter())
 
