@@ -60,8 +60,6 @@ class BEIR(Suite):
     def __call__(
         self,
         pipelines: Sequence[Any] = None,
-        ranking_generators: Sequence[callable] = None,
-        indexing_generators: Sequence[callable] = None,
         eval_metrics: Sequence[Any] = None,
         names: Optional[Sequence[str]] = None,
         subset: Optional[str] = None,
@@ -82,9 +80,7 @@ class BEIR(Suite):
         precompute_prefix: bool = False,
     ) -> pd.DataFrame:
         results = super().__call__(
-            pipelines=pipelines,
-            ranking_generators=ranking_generators,
-            indexing_generators=indexing_generators,
+            ranking_generators=pipelines,
             eval_metrics=eval_metrics,
             names=names,
             subset=subset,

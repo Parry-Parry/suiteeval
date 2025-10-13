@@ -353,7 +353,6 @@ class Suite(ABC, metaclass=SuiteMeta):
         **experiment_kwargs: Dict[str, Any],
     ) -> pd.DataFrame:
         results = []
-        breakpoint()
         for ds_name, ds in self.datasets:
             if subset and ds_name != subset:
                 continue
