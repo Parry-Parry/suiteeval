@@ -6,7 +6,7 @@ import click
 import pyterrier as pt
 if not pt.started():
     pt.init()
-from pyterrier_dr import HgfBiEncoder
+from pyterrier_dr import HgfBiEncoder, FlexIndex
 from pyterrier_pisa import PisaIndex
 
 from suiteeval.context import DatasetContext
