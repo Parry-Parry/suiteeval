@@ -36,7 +36,7 @@ datasets = [
 measures = [nDCG @ 10]
 
 
-class BEIR(Suite):
+class _BEIR(Suite):
     """
     BEIR suite for evaluating retrieval systems on various datasets.
 
@@ -132,5 +132,7 @@ class BEIR(Suite):
 
         return results
 
+
+BEIR = _BEIR()
 
 __all__ = ["BEIR"]

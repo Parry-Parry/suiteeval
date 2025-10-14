@@ -83,7 +83,7 @@ def main(
             f"BM25 >> biencoder |size={pisa_size_b}| ({pisa_size_mb:.1f} MB)"
         )
 
-    result = NanoBEIR()(pipelines)
+    result = NanoBEIR(pipelines)
 
     # Identify the label column that contains our parse marker
     label_col = None
