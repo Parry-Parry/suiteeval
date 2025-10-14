@@ -420,10 +420,8 @@ class Suite(ABC, metaclass=SuiteMeta):
                 )
                 df["dataset"] = ds_name
                 results.append(df)
-                # Optional: drop references
                 del pipelines, names
             else:
-                # Stream one-by-one; IMPORTANT: pass a LIST of one transformer
                 for pipeline, name in self.coerce_pipelines_sequential(context, ranking_generators):
                     df = pt.Experiment(
                         [pipeline],  # list, not tuple
@@ -435,7 +433,6 @@ class Suite(ABC, metaclass=SuiteMeta):
                     )
                     df["dataset"] = ds_name
                     results.append(df)
-                    # Release heavy objects ASAP
                     try:
                         del pipeline
                     finally:
@@ -456,7 +453,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         # Aggregate geometric mean only across actual Measure columns
         perquery = experiment_kwargs.get("perquery", False)
         if not perquery and not results.empty:
-            measure_cols = [c for c in results.columns if getattr(c, "__class__", None).__name__ == "Measure"]
+            measure_cols = [str(m) for m in (eval_metrics or self.__default_measures) if str(m) in results.columns]
             if measure_cols:
                 gmean_rows = []
                 for (dataset, name), group in results.groupby(["dataset", "name"], dropna=False):
