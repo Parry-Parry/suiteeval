@@ -229,7 +229,81 @@ class Suite(ABC, metaclass=SuiteMeta):
             )
             self._measures = [nDCG @ 10]
 
-    def coerce_pipelines(
+    def coerce_pipelines_sequential(
+        self,
+        context: DatasetContext,
+        pipeline_generators: "runtime_Sequence|builtins.callable",
+    ) -> Generator[Tuple[Transformer, Optional[str]], None, None]: 
+        """
+        Yield (Transformer, Optional[str]) pairs produced by one or more pipeline generator callables.
+
+        Accepts:
+        • a single callable, or a sequence of callables.
+        • each callable may:
+            - yield one or many of:
+                * Transformer
+                * (Transformer, name)
+                * Sequence[Transformer] (optionally paired with name or names)
+            - or return:
+                * Transformer
+                * (Transformer, name)
+                * Sequence[Transformer]
+                * (Sequence[Transformer], names or single name)
+        """
+        # Normalize the outer container of generators
+        if not isinstance(pipeline_generators, runtime_Sequence) or isinstance(pipeline_generators, (str, bytes)):
+            if not builtins.callable(pipeline_generators):
+                raise TypeError("pipeline_generators must be a callable or a sequence of callables.")
+            gens = [pipeline_generators]
+        else:
+            if not all(builtins.callable(f) for f in pipeline_generators):
+                raise TypeError("All elements of pipeline_generators must be callable.")
+            gens = list(pipeline_generators)
+
+        for gen in gens:
+            out = gen(context)  # pass DatasetContext
+
+            # Helper: emit a (Transformer, Optional[str]) from an item
+            def _emit_item(item):
+                if isinstance(item, tuple) and len(item) == 2:
+                    p, nm = item
+                else:
+                    p, nm = item, None
+
+                if isinstance(p, Transformer):
+                    yield p, nm if isinstance(nm, str) else None
+                elif isinstance(p, runtime_Sequence) and all(isinstance(pi, Transformer) for pi in p):
+                    # broadcast or align names
+                    if isinstance(nm, str):
+                        for pi in p:
+                            yield pi, nm
+                    elif isinstance(nm, runtime_Sequence):
+                        nm_list = list(nm)
+                        if len(nm_list) != len(p):
+                            raise ValueError("Length of names does not match number of pipelines.")
+                        for pi, nmi in zip(p, nm_list):
+                            yield pi, nmi if isinstance(nmi, str) else None
+                    else:
+                        for pi in p:
+                            yield pi, None
+                else:
+                    raise ValueError(f"Pipeline generator {gen} yielded an invalid item: {type(p)}")
+
+            # Case A: the callable yielded items (do NOT materialize to a list)
+            if inspect.isgenerator(out) or isinstance(out, Iterator):
+                for item in out:
+                    yield from _emit_item(item)
+                continue
+
+            # Case B: the callable returned something
+            if isinstance(out, tuple):
+                _pipelines, *_rest = out
+                _names = None if not _rest else _rest[0]
+                yield from _emit_item((_pipelines, _names))
+            else:
+                yield from _emit_item(out)
+
+    def coerce_pipelines_grouped(
         self,
         context: DatasetContext,
         pipeline_generators: "runtime_Sequence|builtins.callable",
@@ -353,6 +427,14 @@ class Suite(ABC, metaclass=SuiteMeta):
         **experiment_kwargs: Dict[str, Any],
     ) -> pd.DataFrame:
         results = []
+
+        baseline = experiment_kwargs.get("baseline", None)
+        if baseline is not None or baseline > -1:
+            logging.warning("Significance tests require pipelines to be grouped, this will incur greater memory usage.")
+            coerce_func = self.coerce_pipelines_grouped
+        else:
+            coerce_func = self.coerce_pipelines_sequential
+
         for ds_name, ds in self.datasets:
             if subset and ds_name != subset:
                 continue
@@ -360,7 +442,7 @@ class Suite(ABC, metaclass=SuiteMeta):
             topics = ds.get_topics()
             qrels = ds.get_qrels()
             context = DatasetContext(ds)
-            pipelines, names = self.coerce_pipelines(context, ranking_generators)
+            pipelines, names = coerce_func(context, ranking_generators)
             df = pt.Experiment(
                 pipelines,
                 eval_metrics=eval_metrics or self.get_measures(ds_name),
