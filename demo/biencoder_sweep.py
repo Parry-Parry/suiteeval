@@ -10,7 +10,7 @@ from pyterrier_dr import HgfBiEncoder, FlexIndex
 from pyterrier_pisa import PisaIndex
 
 from suiteeval.context import DatasetContext
-from suiteeval import BEIR
+from suiteeval import NanoBEIR
 
 
 def _dir_size_bytes(path: Union[str, os.PathLike]) -> int:
