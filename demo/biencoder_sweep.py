@@ -56,7 +56,7 @@ def main(
 
         # --- biencoder indexing ---
         flex_index = FlexIndex(biencoder_dir)
-        biencoder = HgfBiEncoder.from_pretrained(checkpoint, batch_size=256)
+        biencoder = HgfBiEncoder.from_pretrained(checkpoint, batch_size=512)
         e2e_pipe = biencoder >> flex_index
         e2e_pipe.index(context.get_corpus_iter())
 
