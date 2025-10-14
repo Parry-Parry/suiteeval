@@ -429,7 +429,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         results = []
 
         baseline = experiment_kwargs.get("baseline", None)
-        if baseline is not None or baseline > -1:
+        if baseline is not None:
             logging.warning("Significance tests require pipelines to be grouped, this will incur greater memory usage.")
             coerce_func = self.coerce_pipelines_grouped
         else:
