@@ -1,5 +1,10 @@
-from suiteeval.suite.base import Suite
 from ir_measures import nDCG
+from typing import Any, Optional, Sequence, Union
+import pandas as pd
+
+from suiteeval.suite.base import Suite
+from suiteeval.utility import geometric_mean
+
 
 datasets = [
     "nano-beir/arguana",
@@ -19,13 +24,95 @@ datasets = [
 
 measures = [nDCG@10]
 
-NanoBEIR = Suite.register(
-    "nano-beir",
-    datasets,
-    metadata={
+
+class _NanoBEIR(Suite):
+    """
+    Nano BEIR suite for evaluating retrieval systems on various datasets.
+
+    This suite includes a subset and subsampling of datasets from the BEIR benchmark,
+    covering domains like question answering, fact verification, and more.
+    It uses nDCG@10 as the primary measure for evaluation.
+
+    Example:
+        from suiteeval.suite import NanoBEIR
+        results = NanoBEIR(pipeline)
+    """
+
+    _datasets = datasets
+    _measures = measures
+    metadata = {
         "official_measures": measures,
         "description": "Nano Beir is a smaller version (max 50 queries per benchmark) of the Beir suite of benchmarks to test zero-shot transfer.",
     },
-)
+
+    def __call__(
+        self,
+        pipelines: Sequence[Any] = None,
+        eval_metrics: Sequence[Any] = None,
+        subset: Optional[str] = None,
+        perquery: bool = False,
+        batch_size: Optional[int] = None,
+        filter_by_qrels: bool = False,
+        filter_by_topics: bool = True,
+        baseline: Optional[int] = None,
+        test: str = "t",
+        correction: Optional[str] = None,
+        correction_alpha: float = 0.05,
+        highlight: Optional[str] = None,
+        round: Optional[Union[int, dict[str, int]]] = None,
+        verbose: bool = False,
+        save_dir: Optional[str] = None,
+        save_mode: str = "warn",
+        save_format: str = "trec",
+        precompute_prefix: bool = False,
+    ) -> pd.DataFrame:
+        results = super().__call__(
+            ranking_generators=pipelines,
+            eval_metrics=eval_metrics,
+            subset=subset,
+            perquery=perquery,
+            batch_size=batch_size,
+            filter_by_qrels=filter_by_qrels,
+            filter_by_topics=filter_by_topics,
+            baseline=baseline,
+            test=test,
+            correction=correction,
+            correction_alpha=correction_alpha,
+            highlight=highlight,
+            round=round,
+            verbose=verbose,
+            save_dir=save_dir,
+            save_mode=save_mode,
+            save_format=save_format,
+            precompute_prefix=precompute_prefix,
+        )
+
+        if not results:
+            return pd.DataFrame()
+
+        quora = results[results["dataset"] == "nano-beir/quora"]
+        not_quora = results[results["dataset"] != "nano-beir/quora"]
+
+        quora = quora[quora["qid"] != quora["docno"]]
+        results = pd.concat([not_quora, quora], ignore_index=True)
+
+        if not perquery:
+            gmean_rows = []
+            for (dataset, name), group in results.groupby(["dataset", "name"]):
+                row = {"dataset": dataset, "name": name}
+                for measure in self._measures:
+                    if measure in group:
+                        values = group[measure].values
+                        gmean = geometric_mean(values)
+                        row[measure] = gmean
+                gmean_rows.append(row)
+            gmean_df = pd.DataFrame(gmean_rows)
+            gmean_df["Dataset"] = "Overall"
+            results = pd.concat([results, gmean_df], ignore_index=True)
+
+        return results
+
+
+NanoBEIR = _NanoBEIR()
 
 __all__ = ["NanoBEIR"]

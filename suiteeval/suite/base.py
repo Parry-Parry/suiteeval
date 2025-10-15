@@ -174,60 +174,59 @@ class Suite(ABC, metaclass=SuiteMeta):
                 raise ValueError(f"Invalid measure type: {type(measure)}")
         return parsed_measures
 
-    def coerce_measures(self, metadata: List[Dict[str, Any]]) -> None:
+    def coerce_measures(self, metadata: dict[str, Any]) -> None:
         """
-        Checks for recommended measures in the metadata or optionally the dataset documentation.
+        Populate self._measures as a SET of unique Measure objects aggregated from:
+        1) Global metadata['official_measures']
+        2) Per-dataset metadata[name]['official_measures']
+        3) ir_datasets documentation['official_measures'] for each dataset
+        Fallback: {nDCG@10} if nothing is found.
         """
-        if "official_measures" in metadata:
-            # If the metadata has official measures, use those
-            self._measures = self.parse_measures(metadata["official_measures"])
-            if not len(self._measures) == 0:
+        measures_set: set[Measure] = set()
+        seen_keys: set[str] = set()  # to avoid duplicates across different Measure instances
+
+        def _add_many(items: list[Union[str, Measure]] | None) -> None:
+            if not items:
                 return
+            for m in self.parse_measures(items):
+                sig = str(m)
+                if sig not in seen_keys:
+                    measures_set.add(m)
+                    seen_keys.add(sig)
 
-        if any(ds_id in metadata for ds_id in self._datasets):
-            # If any dataset in _datasets has metadata, use that
-            self._measures = {}
-            for ds_id, ds_metadata in metadata.items():
-                if ds_id in self._datasets:
-                    self._measures[ds_id] = self.parse_measures(
-                        ds_metadata.get("official_measures", self.__default_measures)
-                    )
-            if all(
-                isinstance(m, Measure) for m in self._measures.values()
-            ):
-                # If all measures are valid, return
-                return
+        # (1) Global metadata
+        if isinstance(metadata, dict) and "official_measures" in metadata:
+            _add_many(metadata.get("official_measures"))
 
-        for ds_id, ds in self._datasets.items():
-            if self._measures is None:
-                self._measures = {}
-            try:
-                # Try to load the dataset and its measures
-                dataset = irds.load(ds)
-                documentation = dataset.documentation()
-                if hasattr(documentation, "official_measures"):
-                    self._measures[ds_id] = self.parse_measures(
-                        documentation["official_measures"]
-                    )
+        # (2) Per-dataset metadata (keys should be dataset display names)
+        if isinstance(metadata, dict):
+            names = self._datasets
+            for name in names:
+                md = metadata.get(name, {})
+                if isinstance(md, dict) and "official_measures" in md:
+                    _add_many(md.get("official_measures"))
 
-            except Exception as e:
-                logging.warning(f"Failed to load measures for dataset {ds_id}: {e}")
-                pass
+        # (3) ir_datasets documentation for each dataset
+        # Use _dataset_ids (authoritative mapping name -> identifier)
+        ds_ids = getattr(self, "_dataset_ids", {})
+        if isinstance(ds_ids, dict):
+            for name, ds_id in ds_ids.items():
+                try:
+                    ds = irds.load(ds_id)
+                    docs = ds.documentation()
+                    # Many providers expose a dict-like object; be defensive
+                    if isinstance(docs, dict) and "official_measures" in docs:
+                        _add_many(docs.get("official_measures"))
+                except Exception as e:
+                    logging.warning(f"Failed to load measures from documentation for '{name}' ({ds_id}): {e}")
 
-        if any(not isinstance(m, Measure) for m in self._measures.values()):
-            for ds_id, measures in self._measures.items():
-                # if empty list or not at all default to nDCG@10 and warn
-                if not measures or not isinstance(measures, list):
-                    logging.warning(
-                        f"Dataset {ds_id} has no valid measures defined. Defaulting to nDCG@10."
-                    )
-                    self._measures[ds_id] = self.__default_measures
+        # Fallback if we found nothing
+        if not measures_set:
+            logging.warning("No measures discovered; defaulting to {nDCG@10}.")
+            measures_set = {nDCG @ 10}
+            seen_keys = {str(nDCG @ 10)}
 
-        if self._measures is None:
-            logging.warning(
-                "No measures defined for this suite. Defaulting to nDCG@10."
-            )
-            self._measures = [nDCG @ 10]
+        self._measures = measures_set
 
     def coerce_pipelines_sequential(
         self,

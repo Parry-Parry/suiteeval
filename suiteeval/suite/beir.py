@@ -1,4 +1,4 @@
-from typing import Any, Sequence, Optional, Union, Dict
+from typing import Any, Sequence, Optional, Union
 
 from ir_measures import nDCG
 from suiteeval.suite.base import Suite
@@ -71,7 +71,7 @@ class _BEIR(Suite):
         correction: Optional[str] = None,
         correction_alpha: float = 0.05,
         highlight: Optional[str] = None,
-        round: Optional[Union[int, Dict[str, int]]] = None,
+        round: Optional[Union[int, dict[str, int]]] = None,
         verbose: bool = False,
         save_dir: Optional[str] = None,
         save_mode: str = "warn",
