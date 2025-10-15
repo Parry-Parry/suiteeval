@@ -116,6 +116,12 @@ class _BEIR(Suite):
         cqadupstack["dataset"] = "beir/cqadupstack"
         results = pd.concat([not_cqadupstack, cqadupstack], ignore_index=True)
 
+        quora = results[results["dataset"] == "beir/quora/test"]
+        not_quora = results[results["dataset"] != "beir/quora/test"]
+
+        quora = quora[quora["qid"] != quora["docno"]]
+        results = pd.concat([not_quora, quora], ignore_index=True)
+
         if not perquery:
             gmean_rows = []
             for (dataset, name), group in results.groupby(["dataset", "name"]):
