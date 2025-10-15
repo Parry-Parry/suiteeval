@@ -59,7 +59,7 @@ class _BEIR(Suite):
 
     def __call__(
         self,
-        pipelines: Sequence[Any] = None,
+        pipelines: Sequence[Any] = None, # TODO: this should be callable instead?
         eval_metrics: Sequence[Any] = None,
         subset: Optional[str] = None,
         perquery: bool = False,

@@ -43,6 +43,7 @@ class SuiteMeta(ABCMeta):
         datasets: List[str],
         names: Optional[List[str]] = None,
         metadata: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]] = None,
+        query_field: Optional[str] = None
     ) -> "Suite":
         """
         Create (or retrieve) a Suite singleton that wraps the given datasets.
@@ -92,7 +93,8 @@ class SuiteMeta(ABCMeta):
         # now dynamically create the subclass with both mappings
         attrs = {
             "_datasets": dataset_map,
-            "_metadata": metadata_map
+            "_metadata": metadata_map,
+            "_query_field": query_field,
         }
         new_cls = mcs(suite_name, (Suite,), attrs)
 
@@ -109,6 +111,7 @@ class Suite(ABC, metaclass=SuiteMeta):
     """
 
     _datasets: Union[List[str], Dict[str, str]] = {}
+    _query_field: Optional[str] = None
     _metadata: Dict[str, Any] = {}
     _measures: List[Measure] = None
     __default_measures: List[Measure] = [nDCG @ 10]
@@ -402,7 +405,7 @@ class Suite(ABC, metaclass=SuiteMeta):
             if subset and ds_name != subset:
                 continue
 
-            topics = ds.get_topics()
+            topics = ds.get_topics(self._query_field, tokenise_query=False)
             qrels = ds.get_qrels()
             context = DatasetContext(ds)
 

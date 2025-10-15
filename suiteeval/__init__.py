@@ -5,6 +5,7 @@ __version__ = "0.1.0"
 from suiteeval.suite import (
     Suite,
     BEIR,
+    BRIGHT,
     Lotte,
     MSMARCODocument,
     MSMARCOPassage,
@@ -16,6 +17,7 @@ from suiteeval.context import DatasetContext
 __all__ = [
     "Suite",
     "BEIR",
+    "BRIGHT",
     "Lotte",
     "MSMARCODocument",
     "MSMARCOPassage",
