@@ -8,6 +8,7 @@ import pyterrier as pt
 if not pt.started():
     pt.init()
 import pyterrier_alpha as pta
+from pyterrier_caching import ScorerCache, RetrieverCache
 from pyterrier_dr import HgfBiEncoder, FlexIndex
 from pyterrier_pisa import PisaIndex
 
@@ -143,12 +144,33 @@ class RRLinearFusion(pt.Transformer):
 @click.command()
 @click.option("--save-path", type=str, default='results.csv.gz', help="Path to save the CSV results.")
 @click.option("--checkpoint", type=str, default="Shitao/RetroMAE_MSMARCO_finetune", help="Checkpoint for biencoder.")
+@click.option("--score-cache-dir", type=str, default="score_cache",
+              help="Directory where scorer caches are stored (one subdir per dataset/checkpoint).")
 def main(
         save_path: str,
         checkpoint: str,
+        score_cache_dir: str,
         ):
     def pipelines(context: DatasetContext):
-        # Paths
+        # --- cache roots and tags ---
+        dataset_tag = Path(context.path).name  # stable per corpus path
+        checkpoint_tag = Path(checkpoint).name.replace(os.sep, "_")
+        cache_root = Path(score_cache_dir)
+        cache_root.mkdir(parents=True, exist_ok=True)
+
+        # scorer cache (query, docno -> score) for the bi-encoder re-ranker
+        biencoder_cache_dir = cache_root / f"{dataset_tag}__{checkpoint_tag}"
+        biencoder_cache_dir.mkdir(parents=True, exist_ok=True)
+
+        # retriever caches (cache full retrieved lists) for e2e and bm25
+        retrievers_root = cache_root / "retrievers"
+        retrievers_root.mkdir(parents=True, exist_ok=True)
+        bm25_cache_dir = retrievers_root / f"{dataset_tag}__bm25"
+        bm25_cache_dir.mkdir(parents=True, exist_ok=True)
+        e2e_cache_dir = retrievers_root / f"{dataset_tag}__{checkpoint_tag}__e2e"
+        e2e_cache_dir.mkdir(parents=True, exist_ok=True)
+
+        # --- index paths ---
         biencoder_dir = f"{context.path}/index.flex"
         pisa_dir = f"{context.path}/index.pisa"
 
@@ -157,7 +179,10 @@ def main(
         biencoder = HgfBiEncoder.from_pretrained(checkpoint, batch_size=512)
         indexer_pipe = biencoder >> flex_index
         indexer_pipe.index(context.get_corpus_iter())
-        e2e_pipe = biencoder >> flex_index.torch_retriever()
+
+        # end-to-end retriever, cached
+        e2e_retr = RetrieverCache(str(e2e_cache_dir), flex_index.torch_retriever(), on="query")
+        e2e_pipe = biencoder >> e2e_retr
 
         # Compute on-disk size for biencoder index
         biencoder_size_b = _dir_size_bytes(biencoder_dir)
@@ -176,16 +201,26 @@ def main(
         pisa_size_b = _dir_size_bytes(pisa_dir)
         pisa_size_mb = _mb(pisa_size_b)
 
-        bm25 = pisa_index.bm25()
-        biencoder_pipe = bm25 >> context.text_loader() >> biencoder
+        # BM25 retriever, cached
+        bm25 = RetrieverCache(str(bm25_cache_dir), pisa_index.bm25(), on="query")
 
-        for i in range(0.0, 1.0, 0.1):
+        # Cached bi-encoder scorer (re-ranker). Cache wraps the scorer, not the retriever.
+        biencoder_scorer = context.text_loader() >> biencoder
+        cached_biencoder_scorer = ScorerCache(str(biencoder_cache_dir), biencoder_scorer)
+
+        # Re-ranking pipeline: cached BM25 retrieval >> cached scorer
+        biencoder_pipe = bm25 >> cached_biencoder_scorer
+
+        # Interpolation grid (0.0 .. 1.0 step 0.1)
+        alphas = [x / 10.0 for x in range(0, 11)]
+
+        for i in alphas:
             yield (
                 RRLinearFusion(e2e_pipe, biencoder_pipe, alpha=i),
                 f"RRLinearFusion(Bi-Encoder E2E, BM25 >> Bi-Encoder, alpha={i:.1f}) |size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)"
             )
 
-        for i in range(0.0, 1.0, 0.1):
+        for i in alphas:
             yield (
                 RRLinearFusion(bm25, biencoder_pipe, alpha=i),
                 f"RRLinearFusion(BM25, BM25 >> Bi-Encoder, alpha={i:.1f}) |size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)"
