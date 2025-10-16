@@ -165,10 +165,8 @@ def main(
         # retriever caches (cache full retrieved lists) for e2e and bm25
         retrievers_root = cache_root / "retrievers"
         retrievers_root.mkdir(parents=True, exist_ok=True)
-        bm25_cache_dir = retrievers_root / f"{dataset_tag}__bm25"
-        bm25_cache_dir.mkdir(parents=True, exist_ok=True)
-        e2e_cache_dir = retrievers_root / f"{dataset_tag}__{checkpoint_tag}__e2e"
-        e2e_cache_dir.mkdir(parents=True, exist_ok=True)
+        bm25_cache_path = retrievers_root / f"{dataset_tag}__bm25.dbm"
+        e2e_cache_path = retrievers_root / f"{dataset_tag}__{checkpoint_tag}__e2e.dbm"
 
         # --- index paths ---
         biencoder_dir = f"{context.path}/index.flex"
@@ -181,7 +179,7 @@ def main(
         indexer_pipe.index(context.get_corpus_iter())
 
         # end-to-end retriever, cached
-        e2e_retr = RetrieverCache(str(e2e_cache_dir), flex_index.torch_retriever(), on="query")
+        e2e_retr = RetrieverCache(str(e2e_cache_path), flex_index.torch_retriever(), on="query")
         e2e_pipe = biencoder >> e2e_retr
 
         # Compute on-disk size for biencoder index
@@ -202,7 +200,7 @@ def main(
         pisa_size_mb = _mb(pisa_size_b)
 
         # BM25 retriever, cached
-        bm25 = RetrieverCache(str(bm25_cache_dir), pisa_index.bm25(), on="query")
+        bm25 = RetrieverCache(str(bm25_cache_path), pisa_index.bm25(), on="query")
 
         # Cached bi-encoder scorer (re-ranker). Cache wraps the scorer, not the retriever.
         biencoder_scorer = context.text_loader() >> biencoder
