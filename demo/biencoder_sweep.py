@@ -141,11 +141,11 @@ class RRLinearFusion(pt.Transformer):
 
 
 @click.command()
-@click.option("--save-path", type=str, required=True, help="Path to save the CSV results.")
-@click.option("--checkpoint", type=str, default="bert-base-uncased", help="Checkpoint for biencoder.")
+@click.option("--save-path", type=str, default='results.csv.gz', help="Path to save the CSV results.")
+@click.option("--checkpoint", type=str, default="Shitao/RetroMAE_MSMARCO_finetune", help="Checkpoint for biencoder.")
 def main(
         save_path: str,
-        checkpoint: str = "bert-base-uncased",
+        checkpoint: str,
         ):
     def pipelines(context: DatasetContext):
         # Paths
