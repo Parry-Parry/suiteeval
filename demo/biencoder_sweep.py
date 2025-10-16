@@ -1,11 +1,13 @@
 from pathlib import Path
 import os
-from typing import Union
+from typing import Optional, Union
 
 import click
+import pandas as pd
 import pyterrier as pt
 if not pt.started():
     pt.init()
+import pyterrier_alpha as pta
 from pyterrier_dr import HgfBiEncoder, FlexIndex
 from pyterrier_pisa import PisaIndex
 
@@ -40,6 +42,102 @@ def _dir_size_bytes(path: Union[str, os.PathLike]) -> int:
 
 def _mb(x_bytes: int) -> float:
     return x_bytes / (1024.0 ** 2)
+
+
+def rr_linear_fusion(
+    r1: pd.DataFrame,
+    r2: pd.DataFrame,
+    k: int = 60,
+    alpha: float = 0.5,
+    num_results: Optional[int] = 1000
+) -> pd.DataFrame:
+    """
+    Reciprocal-Rank Linear Interpolation between exactly two ranking result frames.
+
+    Fused score s(d) = alpha * (1/(rank_1(d)+k)) + (1-alpha) * (1/(rank_2(d)+k)).
+    Missing documents in a list default to 0 contribution from that list.
+
+    Args:
+      r1, r2: result frames with columns ['qid','docno','score'] (and optionally 'query').
+      k: constant for reciprocal rank.
+      alpha: interpolation weight in [0,1] applied to r1; (1-alpha) applied to r2.
+      num_results: number of results to keep per query; if None, keep all.
+    """
+    assert 0.0 <= alpha <= 1.0, "alpha must be in [0, 1]"
+
+    # Validate and ensure ranks exist
+    pta.validate.result_frame(r1, extra_columns=['score'])
+    pta.validate.result_frame(r2, extra_columns=['score'])
+    pt.model.add_ranks(r1)
+    pt.model.add_ranks(r2)
+
+    # Keep optional 'query' if provided; otherwise synthesize a neutral column for merge
+    has_query = 'query' in r1.columns and 'query' in r2.columns
+    merge_keys = ['qid', 'docno'] + (['query'] if has_query else [])
+
+    # Convert to RRF scores
+    s1 = r1[merge_keys + ['rank']].copy()
+    s1['rrf1'] = 1.0 / (s1['rank'] + k)
+    s1 = s1.drop(columns=['rank'])
+
+    s2 = r2[merge_keys + ['rank']].copy()
+    s2['rrf2'] = 1.0 / (s2['rank'] + k)
+    s2 = s2.drop(columns=['rank'])
+
+    # Outer merge and interpolate
+    merged = s1.merge(s2, how='outer', on=merge_keys)
+    merged['rrf1'] = merged['rrf1'].fillna(0.0)
+    merged['rrf2'] = merged['rrf2'].fillna(0.0)
+    merged = merged.assign(score=alpha * merged['rrf1'] + (1.0 - alpha) * merged['rrf2'])
+    merged = merged.drop(columns=['rrf1', 'rrf2'])
+
+    # Rank within query and apply cutoff if requested
+    pt.model.add_ranks(merged)
+    merged = merged.sort_values(['qid', 'rank'], ascending=[True, True])
+
+    if num_results is not None:
+        merged = merged[merged['rank'] < num_results]
+
+    # Reorder columns to match PyTerrier expectations
+    cols = ['qid', 'docno', 'score', 'rank']
+    if has_query:
+        cols = ['qid', 'query', 'docno', 'score', 'rank']
+    return merged[cols].reset_index(drop=True)
+
+
+class RRLinearFusion(pt.Transformer):
+    """
+    Reciprocal-Rank Linear Interpolation between exactly two transformers.
+
+    For each ranking i ∈ {1,2}, we compute an RRF score s_i(d) = 1 / (rank_i(d) + k).
+    The fused score is:  s(d) = alpha * s_1(d) + (1 - alpha) * s_2(d).
+
+    Args:
+      transformers: exactly two transformers to fuse.
+      k: constant for reciprocal-rank computation.
+      alpha: interpolation weight in [0, 1]; weight for the first transformer.
+      num_results: number of results to keep per query; if None, keep all.
+    """
+    schematic = {'inner_pipelines_mode': 'combine'}
+
+    def __init__(
+        self,
+        *transformers: pt.Transformer,
+        k: int = 60,
+        alpha: float = 0.5,
+        num_results: Optional[int] = 1000
+    ):
+        assert len(transformers) == 2, "RRLinearFusion requires exactly two transformers"
+        assert 0.0 <= alpha <= 1.0, "alpha must be in [0, 1]"
+        self.transformers = transformers
+        self.k = k
+        self.alpha = alpha
+        self.num_results = num_results
+
+    def transform(self, inp: pd.DataFrame) -> pd.DataFrame:
+        r1 = self.transformers[0](inp)
+        r2 = self.transformers[1](inp)
+        return rr_linear_fusion(r1, r2, k=self.k, alpha=self.alpha, num_results=self.num_results)
 
 
 @click.command()
@@ -78,11 +176,15 @@ def main(
         pisa_size_b = _dir_size_bytes(pisa_dir)
         pisa_size_mb = _mb(pisa_size_b)
 
-        # BM25 >> biencoder rescoring pipeline
-        yield (
-            pisa_index.bm25() >> context.text_loader() >> biencoder,
-            f"BM25 >> biencoder |size={pisa_size_b}| ({pisa_size_mb:.1f} MB)"
-        )
+        bm25 = pisa_index.bm25()
+        biencoder = bm25 >> context.text_loader() >> biencoder
+
+        for i in range(0, 1, 0.1):
+            yield (
+                RRLinearFusion(bm25, biencoder, alpha=i),
+                f"RRLinearFusion(BM25, biencoder, alpha={i:.1f}) |size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)"
+            )
+
 
     result = NanoBEIR(pipelines)
 
