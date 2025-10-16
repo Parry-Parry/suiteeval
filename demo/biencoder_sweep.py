@@ -153,16 +153,15 @@ def main(
         ):
     def pipelines(context: DatasetContext):
         # --- cache roots and tags ---
-        dataset_tag = Path(context.path).name  # stable per corpus path
+        dataset_tag = Path(context.path).name
         checkpoint_tag = Path(checkpoint).name.replace(os.sep, "_")
         cache_root = Path(score_cache_dir)
         cache_root.mkdir(parents=True, exist_ok=True)
 
-        # scorer cache (query, docno -> score) for the bi-encoder re-ranker
+        # scorer cache for the bi-encoder re-ranker
         biencoder_cache_dir = cache_root / f"{dataset_tag}__{checkpoint_tag}"
-        biencoder_cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # retriever caches (cache full retrieved lists) for e2e and bm25
+        # retriever caches (cache full retrieved lists)
         retrievers_root = cache_root / "retrievers"
         retrievers_root.mkdir(parents=True, exist_ok=True)
         bm25_cache_path = retrievers_root / f"{dataset_tag}__bm25.dbm"
@@ -178,8 +177,11 @@ def main(
         indexer_pipe = biencoder >> flex_index
         indexer_pipe.index(context.get_corpus_iter())
 
-        # end-to-end retriever, cached
-        e2e_retr = RetrieverCache(str(e2e_cache_path), flex_index.torch_retriever(), on="query")
+        # --- end-to-end retriever, reuse existing cache if found ---
+        if e2e_cache_path.exists():
+            e2e_retr = RetrieverCache(str(e2e_cache_path))
+        else:
+            e2e_retr = RetrieverCache(str(e2e_cache_path), flex_index.torch_retriever(), on="query")
         e2e_pipe = biencoder >> e2e_retr
 
         # Compute on-disk size for biencoder index
@@ -199,29 +201,37 @@ def main(
         pisa_size_b = _dir_size_bytes(pisa_dir)
         pisa_size_mb = _mb(pisa_size_b)
 
-        # BM25 retriever, cached
-        bm25 = RetrieverCache(str(bm25_cache_path), pisa_index.bm25(), on="query")
+        # --- BM25 retriever, reuse existing cache if found ---
+        if bm25_cache_path.exists():
+            bm25 = RetrieverCache(str(bm25_cache_path))
+        else:
+            bm25 = RetrieverCache(str(bm25_cache_path), pisa_index.bm25(), on="query")
 
-        # Cached bi-encoder scorer (re-ranker). Cache wraps the scorer, not the retriever.
+        # --- bi-encoder scorer cache, reuse existing if found ---
         biencoder_scorer = context.text_loader() >> biencoder
-        cached_biencoder_scorer = ScorerCache(str(biencoder_cache_dir), biencoder_scorer)
+        if biencoder_cache_dir.exists():
+            cached_biencoder_scorer = ScorerCache(str(biencoder_cache_dir))
+        else:
+            cached_biencoder_scorer = ScorerCache(str(biencoder_cache_dir), biencoder_scorer)
 
-        # Re-ranking pipeline: cached BM25 retrieval >> cached scorer
+        # re-ranking pipeline
         biencoder_pipe = bm25 >> cached_biencoder_scorer
 
-        # Interpolation grid (0.0 .. 1.0 step 0.1)
+        # interpolation grid
         alphas = [x / 10.0 for x in range(0, 11)]
 
         for i in alphas:
             yield (
                 RRLinearFusion(e2e_pipe, biencoder_pipe, alpha=i),
-                f"RRLinearFusion(Bi-Encoder E2E, BM25 >> Bi-Encoder, alpha={i:.1f}) |size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)"
+                f"RRLinearFusion(Bi-Encoder E2E, BM25 >> Bi-Encoder, alpha={i:.1f}) "
+                f"|size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)"
             )
 
         for i in alphas:
             yield (
                 RRLinearFusion(bm25, biencoder_pipe, alpha=i),
-                f"RRLinearFusion(BM25, BM25 >> Bi-Encoder, alpha={i:.1f}) |size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)"
+                f"RRLinearFusion(BM25, BM25 >> Bi-Encoder, alpha={i:.1f}) "
+                f"|size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)"
             )
 
     result = BEIR(pipelines)
