@@ -177,11 +177,17 @@ def main(
         pisa_size_mb = _mb(pisa_size_b)
 
         bm25 = pisa_index.bm25()
-        biencoder = bm25 >> context.text_loader() >> biencoder
+        biencoder_pipe = bm25 >> context.text_loader() >> biencoder
 
         for i in range(0.0, 1.0, 0.1):
             yield (
-                RRLinearFusion(bm25, biencoder, alpha=i),
+                RRLinearFusion(e2e_pipe, biencoder_pipe, alpha=i),
+                f"RRLinearFusion(Bi-Encoder E2E, BM25 >> Bi-Encoder, alpha={i:.1f}) |size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)"
+            )
+
+        for i in range(0.0, 1.0, 0.1):
+            yield (
+                RRLinearFusion(bm25, biencoder_pipe, alpha=i),
                 f"RRLinearFusion(BM25, BM25 >> Bi-Encoder, alpha={i:.1f}) |size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)"
             )
 
