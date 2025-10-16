@@ -12,7 +12,7 @@ from pyterrier_dr import HgfBiEncoder, FlexIndex
 from pyterrier_pisa import PisaIndex
 
 from suiteeval.context import DatasetContext
-from suiteeval import NanoBEIR
+from suiteeval import BEIR
 
 
 def _dir_size_bytes(path: Union[str, os.PathLike]) -> int:
@@ -165,7 +165,7 @@ def main(
 
         yield (
             e2e_pipe,
-            f"biencoder end-to-end |size={biencoder_size_b}| ({biencoder_size_mb:.1f} MB)"
+            f"Bi-Encoder end-to-end |size={biencoder_size_b}| ({biencoder_size_mb:.1f} MB)"
         )
 
         # --- PISA (BM25) indexing ---
@@ -182,11 +182,10 @@ def main(
         for i in range(0, 1, 0.1):
             yield (
                 RRLinearFusion(bm25, biencoder, alpha=i),
-                f"RRLinearFusion(BM25, biencoder, alpha={i:.1f}) |size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)"
+                f"RRLinearFusion(BM25, BM25 >> Bi-Encoder, alpha={i:.1f}) |size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)"
             )
 
-
-    result = NanoBEIR(pipelines)
+    result = BEIR(pipelines)
 
     # Identify the label column that contains our parse marker
     label_col = None

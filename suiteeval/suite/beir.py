@@ -132,7 +132,7 @@ class _BEIR(Suite):
         precompute_prefix: bool = False,
     ) -> pd.DataFrame:
         results = super().__call__(
-            ranking_generators=pipelines,
+            pipelines,
             eval_metrics=eval_metrics,
             subset=subset,
             perquery=perquery,
