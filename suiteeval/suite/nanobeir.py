@@ -9,6 +9,7 @@ from pyterrier import Transformer
 
 from suiteeval.context import DatasetContext
 from suiteeval.suite.base import Suite
+from suiteeval.suite.beir import dataframe_filter
 from suiteeval.utility import geometric_mean
 
 
