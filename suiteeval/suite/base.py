@@ -467,4 +467,3 @@ class Suite(ABC, metaclass=SuiteMeta):
                 results = pd.concat([results, gmean_df], ignore_index=True)
 
         return results
-

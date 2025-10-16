@@ -86,7 +86,7 @@ class _BEIR(Suite):
         for p, nm in super().coerce_pipelines_sequential(context, pipeline_generators):
             if "quora" in ds_str:
                 # Append the filter as a no-op transformer for other outputs
-                p = p >> pt.apply.generic(dataframe_filter, transform_outputs=lambda x: x)
+                p = p >> pt.apply.generic(dataframe_filter)
             yield p, nm
 
     def coerce_pipelines_grouped(
@@ -104,7 +104,7 @@ class _BEIR(Suite):
 
         if "quora" in ds_str:
             pipelines = [
-                p >> pt.apply.generic(dataframe_filter, transform_outputs=lambda x: x)
+                p >> pt.apply.generic(dataframe_filter)
                 for p in pipelines
             ]
 
@@ -152,7 +152,7 @@ class _BEIR(Suite):
             precompute_prefix=precompute_prefix,
         )
 
-        if not results:
+        if results is None or results.empty:
             return pd.DataFrame()
 
         cqadupstack = results[results["dataset"].str.startswith("beir/cqadupstack/")]
