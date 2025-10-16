@@ -133,7 +133,7 @@ class _BEIR(Suite):
                         row[measure] = gmean
                 gmean_rows.append(row)
             gmean_df = pd.DataFrame(gmean_rows)
-            gmean_df["Dataset"] = "Overall"
+            gmean_df["dataset"] = "Overall"
             results = pd.concat([results, gmean_df], ignore_index=True)
 
         return results
