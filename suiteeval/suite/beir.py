@@ -1,9 +1,14 @@
-from typing import Any, Sequence, Optional, Union
+import builtins
+from collections.abc import Sequence as runtime_Sequence
+from typing import Any, Sequence, Optional, Union, Tuple
 
 from ir_measures import nDCG
-from suiteeval.suite.base import Suite
 import pandas as pd
+import pyterrier as pt
+from pyterrier import Transformer
 
+from suiteeval.context import DatasetContext
+from suiteeval.suite.base import Suite
 from suiteeval.utility import geometric_mean
 
 datasets = [
@@ -36,6 +41,16 @@ datasets = [
 measures = [nDCG @ 10]
 
 
+def document_filter(row):
+    if row.qid == row.docno:
+        return False
+    return True
+
+
+def dataframe_filter(df):
+    return df[df.apply(document_filter, axis=1)]
+
+
 class _BEIR(Suite):
     """
     BEIR suite for evaluating retrieval systems on various datasets.
@@ -56,6 +71,44 @@ class _BEIR(Suite):
         "official_measures": measures,
         "description": " Beir is a suite of benchmarks to test zero-shot transfer.",
     }
+
+    def coerce_pipelines_sequential(
+        self,
+        context: DatasetContext,
+        pipeline_generators: "runtime_Sequence|builtins.callable",
+    ):
+        """
+        Wrap each streamed pipeline with a dataframe filter only for Quora,
+        preserving (pipeline, name) pairs and not materialising the sequence.
+        """
+        ds_str = context.dataset._irds_id.lower()
+
+        for p, nm in super().coerce_pipelines_sequential(context, pipeline_generators):
+            if "quora" in ds_str:
+                # Append the filter as a no-op transformer for other outputs
+                p = p >> pt.apply.generic(dataframe_filter, transform_outputs=lambda x: x)
+            yield p, nm
+
+    def coerce_pipelines_grouped(
+        self,
+        context: DatasetContext,
+        pipeline_generators: "runtime_Sequence|builtins.callable",
+    ) -> Tuple[list[Transformer], Optional[list[str]]]:
+        """
+        Materialise all pipelines (and names) via the superclass, then
+        append a dataframe filter only for Quora datasets.
+        """
+        pipelines, names = super().coerce_pipelines_grouped(context, pipeline_generators)
+
+        ds_str = context.dataset._irds_id.lower()
+
+        if "quora" in ds_str:
+            pipelines = [
+                p >> pt.apply.generic(dataframe_filter, transform_outputs=lambda x: x)
+                for p in pipelines
+            ]
+
+        return pipelines, names
 
     def __call__(
         self,
@@ -115,12 +168,6 @@ class _BEIR(Suite):
             cqadupstack = cqadupstack.groupby(["dataset", "name"]).mean().reset_index()
         cqadupstack["dataset"] = "beir/cqadupstack"
         results = pd.concat([not_cqadupstack, cqadupstack], ignore_index=True)
-
-        quora = results[results["dataset"] == "beir/quora/test"]
-        not_quora = results[results["dataset"] != "beir/quora/test"]
-
-        quora = quora[quora["qid"] != quora["docno"]]
-        results = pd.concat([not_quora, quora], ignore_index=True)
 
         if not perquery:
             gmean_rows = []

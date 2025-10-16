@@ -1,7 +1,13 @@
-from ir_measures import nDCG
-from typing import Any, Optional, Sequence, Union
-import pandas as pd
+import builtins
+from collections.abc import Sequence as runtime_Sequence
+from typing import Any, Sequence, Optional, Union, Tuple
 
+from ir_measures import nDCG
+import pandas as pd
+import pyterrier as pt
+from pyterrier import Transformer
+
+from suiteeval.context import DatasetContext
 from suiteeval.suite.base import Suite
 from suiteeval.utility import geometric_mean
 
@@ -43,7 +49,45 @@ class _NanoBEIR(Suite):
     metadata = {
         "official_measures": measures,
         "description": "Nano Beir is a smaller version (max 50 queries per benchmark) of the Beir suite of benchmarks to test zero-shot transfer.",
-    },
+    }
+
+    def coerce_pipelines_sequential(
+        self,
+        context: DatasetContext,
+        pipeline_generators: "runtime_Sequence|builtins.callable",
+    ):
+        """
+        Wrap each streamed pipeline with a dataframe filter only for Quora,
+        preserving (pipeline, name) pairs and not materialising the sequence.
+        """
+        ds_str = context.dataset._irds_id.lower()
+
+        for p, nm in super().coerce_pipelines_sequential(context, pipeline_generators):
+            if "quora" in ds_str:
+                # Append the filter as a no-op transformer for other outputs
+                p = p >> pt.apply.generic(dataframe_filter, transform_outputs=lambda x: x)
+            yield p, nm
+
+    def coerce_pipelines_grouped(
+        self,
+        context: DatasetContext,
+        pipeline_generators: "runtime_Sequence|builtins.callable",
+    ) -> Tuple[list[Transformer], Optional[list[str]]]:
+        """
+        Materialise all pipelines (and names) via the superclass, then
+        append a dataframe filter only for Quora datasets.
+        """
+        pipelines, names = super().coerce_pipelines_grouped(context, pipeline_generators)
+
+        ds_str = context.dataset._irds_id.lower()
+
+        if "quora" in ds_str:
+            pipelines = [
+                p >> pt.apply.generic(dataframe_filter, transform_outputs=lambda x: x)
+                for p in pipelines
+            ]
+
+        return pipelines, names
 
     def __call__(
         self,
