@@ -8,12 +8,11 @@ import pyterrier as pt
 if not pt.started():
     pt.init()
 import pyterrier_alpha as pta
-from pyterrier_caching import ScorerCache, RetrieverCache
 from pyterrier_dr import HgfBiEncoder, FlexIndex
 from pyterrier_pisa import PisaIndex
 
 from suiteeval.context import DatasetContext
-from suiteeval import BEIR
+from suiteeval import NanoBEIR
 
 
 def _dir_size_bytes(path: Union[str, os.PathLike]) -> int:
@@ -177,12 +176,7 @@ def main(
         indexer_pipe = biencoder >> flex_index
         indexer_pipe.index(context.get_corpus_iter())
 
-        # --- end-to-end retriever, reuse existing cache if found ---
-        if e2e_cache_path.exists():
-            e2e_retr = RetrieverCache(str(e2e_cache_path))
-        else:
-            e2e_retr = RetrieverCache(str(e2e_cache_path), flex_index.torch_retriever(), on="query")
-        e2e_pipe = biencoder >> e2e_retr
+        e2e_pipe = biencoder >> biencoder
 
         # Compute on-disk size for biencoder index
         biencoder_size_b = _dir_size_bytes(biencoder_dir)
@@ -201,21 +195,12 @@ def main(
         pisa_size_b = _dir_size_bytes(pisa_dir)
         pisa_size_mb = _mb(pisa_size_b)
 
-        # --- BM25 retriever, reuse existing cache if found ---
-        if bm25_cache_path.exists():
-            bm25 = RetrieverCache(str(bm25_cache_path))
-        else:
-            bm25 = RetrieverCache(str(bm25_cache_path), pisa_index.bm25(), on="query")
+        bm25 = pisa_index.bm25()
 
-        # --- bi-encoder scorer cache, reuse existing if found ---
         biencoder_scorer = context.text_loader() >> biencoder
-        if biencoder_cache_dir.exists():
-            cached_biencoder_scorer = ScorerCache(str(biencoder_cache_dir))
-        else:
-            cached_biencoder_scorer = ScorerCache(str(biencoder_cache_dir), biencoder_scorer)
 
         # re-ranking pipeline
-        biencoder_pipe = bm25 >> cached_biencoder_scorer
+        biencoder_pipe = bm25 >> biencoder_scorer
 
         # interpolation grid
         alphas = [x / 10.0 for x in range(0, 11)]
@@ -234,7 +219,7 @@ def main(
                 f"|size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)"
             )
 
-    result = BEIR(pipelines)
+    result = NanoBEIR(pipelines)
 
     # Identify the label column that contains our parse marker
     label_col = None
