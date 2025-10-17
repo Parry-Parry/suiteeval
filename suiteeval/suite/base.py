@@ -3,7 +3,7 @@ import builtins
 from collections.abc import Sequence as runtime_Sequence, Iterator
 import inspect
 from functools import cache
-from typing import Dict, Generator, List, Optional, Any, Tuple, Union, Sequence
+from typing import Generator, Optional, Any, Tuple, Union, Sequence
 from logging import getLogger
 
 import ir_datasets as irds
@@ -27,8 +27,8 @@ class SuiteMeta(ABCMeta):
     - provides a .register(...) helper
     """
 
-    _classes: Dict[str, type] = {}
-    _instances: Dict[str, "Suite"] = {}
+    _classes: dict[str, type] = {}
+    _instances: dict[str, "Suite"] = {}
 
     def __call__(cls, *args, **kwargs):
         # singleton: only one instance per class
@@ -40,16 +40,16 @@ class SuiteMeta(ABCMeta):
     def register(
         mcs,
         suite_name: str,
-        datasets: List[str],
-        names: Optional[List[str]] = None,
-        metadata: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]] = None,
+        datasets: list[str],
+        names: Optional[list[str]] = None,
+        metadata: Optional[Union[list[dict[str, Any]], dict[str, Any]]] = None,
     ) -> "Suite":
         """
         Create (or retrieve) a Suite singleton that wraps the given datasets.
 
         Args:
             suite_name:  Name of the suite class/instance.
-            datasets:    List of ir_datasets identifiers.
+            datasets:    list of ir_datasets identifiers.
             names:       Optional list of dataset-display names;
                          if omitted, uses the same strings as `datasets`.
             metadata:    Optional list of metadata dictionaries for each dataset.
@@ -105,13 +105,13 @@ class Suite(ABC, metaclass=SuiteMeta):
     """
     Abstract base class for a suite of evaluations.
     Subclasses (and dynamic registrations) must populate:
-        _datasets: Dict[str, ir_datasets.Dataset ID]
+        _datasets: dict[str, ir_datasets.Dataset ID]
     """
 
-    _datasets: Union[List[str], Dict[str, str]] = {}
-    _metadata: Dict[str, Any] = {}
-    _measures: List[Measure] = None
-    __default_measures: List[Measure] = [nDCG @ 10]
+    _datasets: Union[list[str], dict[str, str]] = {}
+    _metadata: dict[str, Any] = {}
+    _measures: list[Measure] = None
+    __default_measures: list[Measure] = [nDCG @ 10]
 
     def __init__(self):
         """
@@ -143,7 +143,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         ), "Suite must have measures defined in _measures"
 
     @staticmethod
-    def parse_measures(measures: List[Union[str, Measure]]) -> List[Measure]:
+    def parse_measures(measures: list[Union[str, Measure]]) -> list[Measure]:
         """
         Parses a list of measures, converting strings to Measure instances.
         """
@@ -288,7 +288,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         self,
         context: DatasetContext,
         pipeline_generators: "runtime_Sequence|builtins.callable",
-    ) -> Tuple[List[Transformer], Optional[List[str]]]:
+    ) -> Tuple[list[Transformer], Optional[list[str]]]:
         """
         Materialise all pipelines and optional names.
         Use when Experiment must see all systems together (e.g., significance tests).
@@ -303,8 +303,8 @@ class Suite(ABC, metaclass=SuiteMeta):
                 raise TypeError("All elements of pipeline_generators must be callable.")
             gens = list(pipeline_generators)
 
-        pipelines: List[Transformer] = []
-        names: List[Optional[str]] = []
+        pipelines: list[Transformer] = []
+        names: list[Optional[str]] = []
 
         def _emit_item_to_lists(item):
             if isinstance(item, tuple) and len(item) == 2:
@@ -352,7 +352,7 @@ class Suite(ABC, metaclass=SuiteMeta):
 
 
     @cache
-    def get_measures(self, dataset) -> List[Measure]:
+    def get_measures(self, dataset) -> list[Measure]:
         """
         Returns the measures for the given dataset.
         If the suite has a single set of measures, it returns that.
@@ -387,7 +387,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         ranking_generators: Union[callable, Sequence[callable]],
         eval_metrics: Sequence[Any] = None,
         subset: Optional[str] = None,
-        **experiment_kwargs: Dict[str, Any],
+        **experiment_kwargs: dict[str, Any],
     ) -> pd.DataFrame:
         results = []
 
