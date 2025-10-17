@@ -176,7 +176,7 @@ def main(
         indexer_pipe = biencoder >> flex_index
         indexer_pipe.index(context.get_corpus_iter())
 
-        e2e_pipe = biencoder >> biencoder
+        e2e_pipe = biencoder >> flex_index
 
         # Compute on-disk size for biencoder index
         biencoder_size_b = _dir_size_bytes(biencoder_dir)
