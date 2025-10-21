@@ -3,6 +3,8 @@ from typing import Any, Sequence, Optional, Union
 from ir_measures import nDCG
 import pandas as pd
 
+from suiteeval.suite.beir import _BEIR
+
 datasets = [
     "nano-beir/arguana",
     "nano-beir/climate-fever",
