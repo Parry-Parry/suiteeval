@@ -47,7 +47,6 @@ def _mb(x_bytes: int) -> float:
 @click.command()
 @click.option("--save-path", type=str, default='results.csv.gz', help="Path to save the CSV results.")
 @click.option("--checkpoint", type=str, default="Shitao/RetroMAE_MSMARCO_finetune", help="Checkpoint for biencoder.")
-              help="Directory where scorer caches are stored (one subdir per dataset/checkpoint).")
 def main(
         save_path: str,
         checkpoint: str,
