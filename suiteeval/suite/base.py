@@ -6,6 +6,7 @@ from functools import cache
 from typing import Generator, Optional, Any, Tuple, Union, Sequence
 from logging import getLogger
 
+import numpy as np
 import ir_datasets as irds
 from ir_measures import nDCG, Measure, parse_measure, parse_trec_measure
 import pandas as pd
@@ -356,18 +357,32 @@ class Suite(ABC, metaclass=SuiteMeta):
     def compute_overall_mean(self, results: pd.DataFrame, eval_metrics: Sequence[Any] = None,) -> pd.DataFrame:
         measure_cols = [str(m) for m in (eval_metrics or self.__default_measures) if str(m) in results.columns]
         if measure_cols:
+            per_ds = (
+                results
+                .groupby(["dataset", "name"], dropna=False)[measure_cols]
+                .mean()
+                .reset_index()
+            )
+
             gmean_rows = []
-            for (dataset, name), group in results.groupby(["dataset", "name"], dropna=False):
-                row = {"dataset": dataset, "name": name}
+            for name, group in per_ds.groupby("name", dropna=False):
+                row = {"dataset": "Overall", "name": name}
                 for col in measure_cols:
                     vals = pd.to_numeric(group[col], errors="coerce").dropna().values
-                    if vals.size:
-                        row[col] = geometric_mean(vals)
+
+                    if np.any(vals <= 0):
+                        eps = 1e-12
+                        vals = vals + eps
+
+                    row[col] = geometric_mean(vals)
                 gmean_rows.append(row)
+
             gmean_df = pd.DataFrame(gmean_rows)
-            gmean_df["dataset"] = "Overall"
+
+            # Append overall rows alongside the original results
             results = pd.concat([results, gmean_df], ignore_index=True)
-            return results
+
+        return results
 
     @cache
     def get_measures(self, dataset) -> list[Measure]:
