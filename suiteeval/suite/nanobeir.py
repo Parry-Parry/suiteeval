@@ -3,10 +3,6 @@ from typing import Any, Sequence, Optional, Union
 from ir_measures import nDCG
 import pandas as pd
 
-from suiteeval.suite.beir import _BEIR
-from suiteeval.utility import geometric_mean
-
-
 datasets = [
     "nano-beir/arguana",
     "nano-beir/climate-fever",
@@ -90,12 +86,6 @@ class _NanoBEIR(_BEIR):
 
         if results is None or results.empty:
             return pd.DataFrame()
-
-        quora = results[results["dataset"] == "nano-beir/quora"]
-        not_quora = results[results["dataset"] != "nano-beir/quora"]
-
-        quora = quora[quora["qid"] != quora["docno"]]
-        results = pd.concat([not_quora, quora], ignore_index=True)
 
         if not perquery:
             results = self.compute_overall_mean(results)
