@@ -350,6 +350,20 @@ class Suite(ABC, metaclass=SuiteMeta):
         final_names = None if not any(names) else [nm if nm is not None else f"pipeline_{i}" for i, nm in enumerate(names)]
         return pipelines, final_names
 
+    def compute_overall_mean(self, results: pd.DataFrame, eval_metrics: Sequence[Any] = None,) -> pd.DataFrame:
+        measure_cols = [str(m) for m in (eval_metrics or self.__default_measures) if str(m) in results.columns]
+        if measure_cols:
+            gmean_rows = []
+            for (dataset, name), group in results.groupby(["dataset", "name"], dropna=False):
+                row = {"dataset": dataset, "name": name}
+                for col in measure_cols:
+                    vals = pd.to_numeric(group[col], errors="coerce").dropna().values
+                    if vals.size:
+                        row[col] = geometric_mean(vals)
+                gmean_rows.append(row)
+            gmean_df = pd.DataFrame(gmean_rows)
+            gmean_df["dataset"] = "Overall"
+            results = pd.concat([results, gmean_df], ignore_index=True)
 
     @cache
     def get_measures(self, dataset) -> list[Measure]:
@@ -452,18 +466,6 @@ class Suite(ABC, metaclass=SuiteMeta):
         # Aggregate geometric mean only across actual Measure columns
         perquery = experiment_kwargs.get("perquery", False)
         if not perquery and not results.empty:
-            measure_cols = [str(m) for m in (eval_metrics or self.__default_measures) if str(m) in results.columns]
-            if measure_cols:
-                gmean_rows = []
-                for (dataset, name), group in results.groupby(["dataset", "name"], dropna=False):
-                    row = {"dataset": dataset, "name": name}
-                    for col in measure_cols:
-                        vals = pd.to_numeric(group[col], errors="coerce").dropna().values
-                        if vals.size:
-                            row[col] = geometric_mean(vals)
-                    gmean_rows.append(row)
-                gmean_df = pd.DataFrame(gmean_rows)
-                gmean_df["Dataset"] = "Overall"
-                results = pd.concat([results, gmean_df], ignore_index=True)
+            results = self.compute_overall_mean(results)
 
         return results

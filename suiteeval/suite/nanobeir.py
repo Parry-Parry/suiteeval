@@ -98,18 +98,7 @@ class _NanoBEIR(_BEIR):
         results = pd.concat([not_quora, quora], ignore_index=True)
 
         if not perquery:
-            gmean_rows = []
-            for (dataset, name), group in results.groupby(["dataset", "name"]):
-                row = {"dataset": dataset, "name": name}
-                for measure in self._measures:
-                    if measure in group:
-                        values = group[measure].values
-                        gmean = geometric_mean(values)
-                        row[measure] = gmean
-                gmean_rows.append(row)
-            gmean_df = pd.DataFrame(gmean_rows)
-            gmean_df["Dataset"] = "Overall"
-            results = pd.concat([results, gmean_df], ignore_index=True)
+            results = self.compute_overall_mean(results)
 
         return results
 
