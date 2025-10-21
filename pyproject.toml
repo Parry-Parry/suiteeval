@@ -24,7 +24,8 @@ version = {attr = "suiteeval.__version__"}
 dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools.packages.find]
-exclude = ["tests"]
+where = ["src"]
+exclude = ["tests*", "build*", "dist*", ".venv*", "_skbuild*"]
 
 [project.urls]
 Repository = "https://github.com/mrparryparry/suiteeval"
