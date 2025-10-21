@@ -1,9 +1,8 @@
 from pathlib import Path
 import os
-from typing import Optional, Union, Iterable, Tuple
+from typing import Union, Tuple
 
 import click
-import pandas as pd
 import pyterrier as pt
 if not pt.started():
     pt.init()
@@ -11,7 +10,7 @@ if not pt.started():
 from pyterrier_pisa import PisaIndex
 
 from suiteeval.context import DatasetContext
-from suiteeval import NanoBEIR
+from suiteeval import BEIR
 
 
 def _dir_size_bytes(path: Union[str, os.PathLike]) -> int:
@@ -90,7 +89,7 @@ def main(
                 yield (bm25, label)
 
     # Run the evaluation suite
-    result = NanoBEIR(pipelines)
+    result = BEIR(pipelines)
 
     # Locate the label column containing our tokens
     label_col = None
