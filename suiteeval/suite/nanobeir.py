@@ -88,7 +88,7 @@ class _NanoBEIR(_BEIR):
             precompute_prefix=precompute_prefix,
         )
 
-        if not results:
+        if results is None or results.empty:
             return pd.DataFrame()
 
         quora = results[results["dataset"] == "nano-beir/quora"]
