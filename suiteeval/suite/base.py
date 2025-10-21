@@ -93,7 +93,8 @@ class SuiteMeta(ABCMeta):
 
         # now dynamically create the subclass with both mappings
         attrs = {
-            "_datasets": dataset_map,
+            "_datasets": dataset_map,        # display-name -> dataset_id (as you already do)
+            "_dataset_ids": dataset_map,     # explicit alias used by other methods
             "_metadata": metadata_map,
             "_query_field": query_field,
         }
@@ -112,6 +113,7 @@ class Suite(ABC, metaclass=SuiteMeta):
     """
 
     _datasets: Union[list[str], dict[str, str]] = {}
+    _dataset_ids: dict[str, str] = {}
     _metadata: dict[str, Any] = {}
     _measures: list[Measure] = None
     __default_measures: list[Measure] = [nDCG @ 10]
@@ -145,6 +147,42 @@ class Suite(ABC, metaclass=SuiteMeta):
         assert (
             self._measures is not None
         ), "Suite must have measures defined in _measures"
+
+    def _iter_corpus_groups(self):
+        """
+        Yield groups of datasets that share the same underlying corpus, determined by
+        ir_datasets.docs_parent_id(dataset_id).
+
+        Yields:
+            (corpus_id: str,
+            corpus_ds: pt.datasets.Dataset,
+            members: list[tuple[str, str]])  # [(display_name, dataset_id), ...]
+        """
+        # Normalise to a list of (name, ds_id)
+        if isinstance(self._datasets, dict):
+            items = list(self._datasets.items())
+        else:
+            items = [(ds_id, ds_id) for ds_id in self._datasets]
+
+        # Build groups keyed by docs-parent (corpus) id
+        groups: dict[str, dict] = {}
+        for name, ds_id in items:
+            try:
+                corpus_id = irds.docs_parent_id(ds_id) or ds_id
+            except Exception:
+                corpus_id = ds_id
+
+            if corpus_id not in groups:
+                groups[corpus_id] = {
+                    "corpus_ds": pt.get_dataset(f"irds:{corpus_id}"),
+                    "members": []
+                }
+            groups[corpus_id]["members"].append((name, ds_id))
+
+        # Emit stable iteration order
+        for corpus_id in groups.keys():
+            g = groups[corpus_id]
+            yield corpus_id, g["corpus_ds"], g["members"]
 
     @staticmethod
     def parse_measures(measures: list[Union[str, Measure]]) -> list[Measure]:
@@ -212,7 +250,7 @@ class Suite(ABC, metaclass=SuiteMeta):
 
         # (3) ir_datasets documentation for each dataset
         # Use _dataset_ids (authoritative mapping name -> identifier)
-        ds_ids = getattr(self, "_dataset_ids", {})
+        ds_ids = self._dataset_ids
         if isinstance(ds_ids, dict):
             for name, ds_id in ds_ids.items():
                 try:
@@ -431,40 +469,74 @@ class Suite(ABC, metaclass=SuiteMeta):
         else:
             coerce_grouped = False
 
-        for ds_name, ds in self.datasets:
-            if subset and ds_name != subset:
+        for corpus_id, corpus_ds, members in self._iter_corpus_groups():
+            # If a subset was requested, skip this corpus unless it contains the subset name
+            if subset and all(name != subset for name, _ in members):
                 continue
 
-            topics = ds.get_topics(self._query_field, tokenise_query=False)
-            qrels = ds.get_qrels()
-            context = DatasetContext(ds)
+            # Single shared context per corpus (indexing happens once here)
+            context = DatasetContext(corpus_ds)
 
             if coerce_grouped:
-                # Materialise all at once
+                # Materialise all pipelines ONCE for the corpus
                 pipelines, names = self.coerce_pipelines_grouped(context, ranking_generators)
-                df = pt.Experiment(
-                    pipelines,
-                    eval_metrics=eval_metrics or self.get_measures(ds_name),
-                    topics=topics,
-                    qrels=qrels,
-                    names=names,
-                    **experiment_kwargs,
-                )
-                df["dataset"] = ds_name
-                results.append(df)
-                del pipelines, names
-            else:
-                for pipeline, name in self.coerce_pipelines_sequential(context, ranking_generators):
+
+                # Evaluate the same systems across each dataset that shares this corpus
+                for ds_name, ds_id in members:
+                    if subset and ds_name != subset:
+                        continue
+
+                    ds_member = pt.get_dataset(f"irds:{ds_id}")
+                    topics = ds_member.get_topics(self._query_field, tokenise_query=False)
+                    qrels = ds_member.get_qrels()
+
                     df = pt.Experiment(
-                        [pipeline],  # list, not tuple
+                        pipelines,
                         eval_metrics=eval_metrics or self.get_measures(ds_name),
                         topics=topics,
                         qrels=qrels,
-                        names=None if name is None else [name],
+                        names=names,
                         **experiment_kwargs,
                     )
                     df["dataset"] = ds_name
                     results.append(df)
+
+                # Release materialised pipelines after all member datasets are processed
+                try:
+                    del pipelines, names
+                finally:
+                    import gc
+                    gc.collect()
+                    try:
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+
+            else:
+                # Stream pipelines one at a time, but reuse each pipeline across ALL member datasets
+                for pipeline, name in self.coerce_pipelines_sequential(context, ranking_generators):
+                    for ds_name, ds_id in members:
+                        if subset and ds_name != subset:
+                            continue
+
+                        ds_member = pt.get_dataset(f"irds:{ds_id}")
+                        topics = ds_member.get_topics(self._query_field, tokenise_query=False)
+                        qrels = ds_member.get_qrels()
+
+                        df = pt.Experiment(
+                            [pipeline],
+                            eval_metrics=eval_metrics or self.get_measures(ds_name),
+                            topics=topics,
+                            qrels=qrels,
+                            names=None if name is None else [name],
+                            **experiment_kwargs,
+                        )
+                        df["dataset"] = ds_name
+                        results.append(df)
+
+                    # Now it is safe to dispose of this pipeline (after all member datasets)
                     try:
                         del pipeline
                     finally:
@@ -477,8 +549,8 @@ class Suite(ABC, metaclass=SuiteMeta):
                         except Exception:
                             pass
 
-            # Release per-dataset references
-            del context, topics, qrels
+            # Release per-corpus context
+            del context
 
         results = pd.concat(results, ignore_index=True) if results else pd.DataFrame()
 

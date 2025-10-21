@@ -161,12 +161,14 @@ class _BEIR(Suite):
             ~results["dataset"].str.startswith("beir/cqadupstack/")
         ]
 
+        grouping = ["dataset", "name"]
         if perquery:
-            cqadupstack = (
-                cqadupstack.groupby(["dataset", "qid", "name"]).mean().reset_index()
-            )
-        else:
-            cqadupstack = cqadupstack.groupby(["dataset", "name"]).mean().reset_index()
+            grouping.append("qid")
+        cqadupstack = cqadupstack.groupby(grouping).agg(
+            {
+                "value": geometric_mean,
+            }
+        ).reset_index()
         cqadupstack["dataset"] = "beir/cqadupstack"
         results = pd.concat([not_cqadupstack, cqadupstack], ignore_index=True)
 
