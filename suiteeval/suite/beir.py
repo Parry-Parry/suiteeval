@@ -71,6 +71,7 @@ class _BEIR(Suite):
         "official_measures": measures,
         "description": " Beir is a suite of benchmarks to test zero-shot transfer.",
     }
+    _query_field = 'text'
 
     def coerce_pipelines_sequential(
         self,
