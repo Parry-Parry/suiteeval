@@ -52,9 +52,9 @@ def test_call_runs_experiment_and_returns_dataframe(suite):
     def yield_pipe(context):
         yield dummy
     # Use the dummy transformer as a ranking generator
-    results = suite(ranking_generators=yield_pipe)
+    results = suite(yield_pipe)
     assert isinstance(results, pd.DataFrame)
     assert 'dataset' in results.columns
     # If not empty, all rows should have the same dataset name
     if not results.empty:
-        assert results['dataset'].unique().tolist() == [ds_id]
+        assert results['dataset'].unique().tolist() == [ds_id, 'Overall']

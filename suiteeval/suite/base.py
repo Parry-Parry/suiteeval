@@ -367,6 +367,7 @@ class Suite(ABC, metaclass=SuiteMeta):
             gmean_df = pd.DataFrame(gmean_rows)
             gmean_df["dataset"] = "Overall"
             results = pd.concat([results, gmean_df], ignore_index=True)
+            return results
 
     @cache
     def get_measures(self, dataset) -> list[Measure]:
