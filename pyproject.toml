@@ -24,7 +24,6 @@ version = {attr = "suiteeval.__version__"}
 dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools.packages.find]
-where = ["src"]
 exclude = ["tests*", "build*", "dist*", ".venv*", "_skbuild*"]
 
 [project.urls]
