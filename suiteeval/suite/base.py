@@ -502,6 +502,12 @@ class Suite(ABC, metaclass=SuiteMeta):
                     ds_member = pt.get_dataset(f"irds:{ds_id}")
                     topics, qrels = self._topics_qrels(ds_member, self._query_field)
 
+                    save_dir = experiment_kwargs.pop("save_dir", None)
+                    if save_dir is not None:
+                        formatted_ds_name = ds_name.replace("/", "-").lower()
+                        ds_save_dir = f"{save_dir}/{formatted_ds_name}"
+                        experiment_kwargs["save_dir"] = ds_save_dir
+
                     df = pt.Experiment(
                         pipelines,
                         eval_metrics=eval_metrics or self.get_measures(ds_name),
