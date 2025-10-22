@@ -30,11 +30,15 @@ measures = [nDCG@10]
 class DocumentFilter(pt.Transformer):
     def __init__(self, qrels: pd.DataFrame, filter_value: int = -100):
         super().__init__()
-        self.pairs = qrels[qrels['relevance'] == filter_value][['qid', 'docno']].values.tolist()
+        self._flagged = set(
+            qrels.loc[qrels['relevance'] == filter_value, ['qid', 'docno']]
+            .itertuples(index=False, name=None)
+        )
 
     def transform(self, inp: pd.DataFrame) -> pd.DataFrame:
-        mask = inp.apply(lambda row: (row['qid'], row['docno']) not in self.pairs, axis=1)
-        return inp[mask]
+        flagged_df = pd.DataFrame(list(self._flagged), columns=['qid', 'docno'])
+        out = inp.merge(flagged_df.assign(_ban=1), on=['qid', 'docno'], how='left')
+        return out[out['_ban'].isna()].drop(columns=['_ban'])
 
 
 class _BRIGHT(Suite):
