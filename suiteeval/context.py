@@ -8,11 +8,7 @@ class DatasetContext:
     Holds both a PyTerrier Dataset and a filesystem path (for indexes, caches, etc.).
     """
 
-    def __init__(
-        self,
-        dataset: pt.datasets.Dataset,
-        path: Optional[str] = None
-    ):
+    def __init__(self, dataset: pt.datasets.Dataset, path: Optional[str] = None):
         """
         Args:
             dataset: The pyterrier Dataset instance (must have `_irds_id`).
@@ -26,10 +22,7 @@ class DatasetContext:
         else:
             self.path = path
 
-    def text_loader(
-        self,
-        fields: Union[List[str], str, Literal['*']] = '*'
-    ):
+    def text_loader(self, fields: Union[List[str], str, Literal["*"]] = "*"):
         """
         Returns a IRDSTextLoader instance for retrieving document texts.
         """

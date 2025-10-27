@@ -86,7 +86,7 @@ class SuiteMeta(ABCMeta):
 
         # dynamically create subclass with mappings
         attrs = {
-            "_datasets": dataset_map,     # display-name -> dataset_id
+            "_datasets": dataset_map,  # display-name -> dataset_id
             "_dataset_ids": dataset_map,  # alias used by other methods
             "_metadata": metadata_map,
             "_query_field": query_field,
@@ -122,19 +122,32 @@ class Suite(ABC, metaclass=SuiteMeta):
         self.__post_init__()
 
     def __post_init__(self):
-        assert self._datasets, "Suite must have at least one dataset defined in _datasets"
+        assert self._datasets, (
+            "Suite must have at least one dataset defined in _datasets"
+        )
 
         if not isinstance(self._datasets, (dict, list)):
-            raise AssertionError("Suite _datasets must be a dict[name->id] or a list[dataset_id]")
+            raise AssertionError(
+                "Suite _datasets must be a dict[name->id] or a list[dataset_id]"
+            )
 
         if isinstance(self._datasets, dict):
-            if not all(isinstance(k, str) and isinstance(v, str) for k, v in self._datasets.items()):
-                raise AssertionError("Suite _datasets must map string names to string dataset IDs")
+            if not all(
+                isinstance(k, str) and isinstance(v, str)
+                for k, v in self._datasets.items()
+            ):
+                raise AssertionError(
+                    "Suite _datasets must map string names to string dataset IDs"
+                )
         else:
             if not all(isinstance(ds, str) for ds in self._datasets):
-                raise AssertionError("Suite _datasets list must contain dataset IDs (str)")
+                raise AssertionError(
+                    "Suite _datasets list must contain dataset IDs (str)"
+                )
 
-        assert self._measures is not None, "Suite must have measures defined in _measures"
+        assert self._measures is not None, (
+            "Suite must have measures defined in _measures"
+        )
 
     # ---------------------------
     # Corpus grouping
@@ -238,21 +251,27 @@ class Suite(ABC, metaclass=SuiteMeta):
         # (2) per-dataset metadata
         if isinstance(metadata, dict):
             # iterate over declared dataset names (works for dict; if list, keys are ids)
-            names_iter = self._datasets if isinstance(self._datasets, dict) else self._datasets
+            names_iter = (
+                self._datasets if isinstance(self._datasets, dict) else self._datasets
+            )
             for name in names_iter:
                 md = metadata.get(name, {})
                 if isinstance(md, dict):
                     _add_many(md.get("official_measures"))
 
         # (3) ir_datasets documentation
-        for name, ds_id in (self._dataset_ids.items() if isinstance(self._dataset_ids, dict) else []):
+        for name, ds_id in (
+            self._dataset_ids.items() if isinstance(self._dataset_ids, dict) else []
+        ):
             try:
                 ds = irds.load(ds_id)
                 docs = getattr(ds, "documentation", lambda: None)()
                 if isinstance(docs, dict):
                     _add_many(docs.get("official_measures"))
             except Exception as e:
-                logging.warning(f"Failed to load measures from documentation for '{name}' ({ds_id}): {e}")
+                logging.warning(
+                    f"Failed to load measures from documentation for '{name}' ({ds_id}): {e}"
+                )
 
         if not measures_accum:
             logging.warning("No measures discovered; defaulting to [nDCG@10].")
@@ -271,9 +290,13 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         Normalise a callable or a sequence of callables to a list of callables.
         """
-        if not isinstance(pipeline_generators, runtime_Sequence) or isinstance(pipeline_generators, (str, bytes)):
+        if not isinstance(pipeline_generators, runtime_Sequence) or isinstance(
+            pipeline_generators, (str, bytes)
+        ):
             if not builtins.callable(pipeline_generators):
-                raise TypeError(f"{what} must be a callable or a sequence of callables.")
+                raise TypeError(
+                    f"{what} must be a callable or a sequence of callables."
+                )
             return [pipeline_generators]  # type: ignore[list-item]
         if not all(builtins.callable(f) for f in pipeline_generators):  # type: ignore[arg-type]
             raise TypeError(f"All elements of {what} must be callable.")
@@ -298,14 +321,18 @@ class Suite(ABC, metaclass=SuiteMeta):
 
             if isinstance(p, Transformer):
                 yield p, (nm if isinstance(nm, str) else None)
-            elif isinstance(p, runtime_Sequence) and all(isinstance(pi, Transformer) for pi in p):
+            elif isinstance(p, runtime_Sequence) and all(
+                isinstance(pi, Transformer) for pi in p
+            ):
                 if isinstance(nm, str):
                     for pi in p:
                         yield pi, nm
                 elif isinstance(nm, runtime_Sequence):
                     nm_list = list(nm)
                     if len(nm_list) != len(p):
-                        raise ValueError("Length of names does not match number of pipelines.")
+                        raise ValueError(
+                            "Length of names does not match number of pipelines."
+                        )
                     for pi, nmi in zip(p, nm_list):
                         yield pi, (nmi if isinstance(nmi, str) else None)
                 else:
@@ -350,14 +377,18 @@ class Suite(ABC, metaclass=SuiteMeta):
             if isinstance(p, Transformer):
                 pipelines.append(p)
                 names.append(nm if isinstance(nm, str) else None)
-            elif isinstance(p, runtime_Sequence) and all(isinstance(pi, Transformer) for pi in p):
+            elif isinstance(p, runtime_Sequence) and all(
+                isinstance(pi, Transformer) for pi in p
+            ):
                 if isinstance(nm, str):
                     pipelines.extend(p)
                     names.extend([nm] * len(p))
                 elif isinstance(nm, runtime_Sequence):
                     nm_list = list(nm)
                     if len(nm_list) != len(p):
-                        raise ValueError("Length of names does not match number of pipelines.")
+                        raise ValueError(
+                            "Length of names does not match number of pipelines."
+                        )
                     pipelines.extend(p)
                     names.extend([n if isinstance(n, str) else None for n in nm_list])
                 else:
@@ -380,11 +411,17 @@ class Suite(ABC, metaclass=SuiteMeta):
                     _emit_item_to_lists(out)
 
         if not pipelines:
-            raise ValueError("No pipelines generated. Ensure your generators produce valid Transformers.")
+            raise ValueError(
+                "No pipelines generated. Ensure your generators produce valid Transformers."
+            )
 
-        final_names = None if not any(names) else [
-            nm if nm is not None else f"pipeline_{i}" for i, nm in enumerate(names)
-        ]
+        final_names = (
+            None
+            if not any(names)
+            else [
+                nm if nm is not None else f"pipeline_{i}" for i, nm in enumerate(names)
+            ]
+        )
         return pipelines, final_names
 
     # ---------------------------
@@ -395,11 +432,14 @@ class Suite(ABC, metaclass=SuiteMeta):
         results: pd.DataFrame,
         eval_metrics: Sequence[Any] = None,
     ) -> pd.DataFrame:
-        measure_cols = [str(m) for m in (eval_metrics or self.__default_measures) if str(m) in results.columns]
+        measure_cols = [
+            str(m)
+            for m in (eval_metrics or self.__default_measures)
+            if str(m) in results.columns
+        ]
         if measure_cols:
             per_ds = (
-                results
-                .groupby(["dataset", "name"], dropna=False)[measure_cols]
+                results.groupby(["dataset", "name"], dropna=False)[measure_cols]
                 .mean()
                 .reset_index()
             )
@@ -443,7 +483,9 @@ class Suite(ABC, metaclass=SuiteMeta):
             for name, ds_id in self._datasets.items():
                 yield name, pt.get_dataset(f"irds:{ds_id}")
         else:
-            raise ValueError("Suite _datasets must be a list or dict mapping names to dataset IDs.")
+            raise ValueError(
+                "Suite _datasets must be a list or dict mapping names to dataset IDs."
+            )
 
     # ---------------------------
     # Internal helpers
@@ -457,9 +499,11 @@ class Suite(ABC, metaclass=SuiteMeta):
     @staticmethod
     def _free_cuda():
         import gc
+
         gc.collect()
         try:
             import torch  # noqa: WPS433 — optional dependency
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except Exception:
@@ -470,7 +514,9 @@ class Suite(ABC, metaclass=SuiteMeta):
     # ---------------------------
     def __call__(
         self,
-        ranking_generators: Union[Callable[[DatasetContext], Any], Sequence[Callable[[DatasetContext], Any]]],
+        ranking_generators: Union[
+            Callable[[DatasetContext], Any], Sequence[Callable[[DatasetContext], Any]]
+        ],
         eval_metrics: Sequence[Any] = None,
         subset: Optional[str] = None,
         **experiment_kwargs: dict[str, Any],
@@ -480,7 +526,9 @@ class Suite(ABC, metaclass=SuiteMeta):
         baseline = experiment_kwargs.get("baseline", None)
         coerce_grouped = baseline is not None
         if coerce_grouped:
-            logging.warning("Significance tests require pipelines to be grouped; this uses more memory.")
+            logging.warning(
+                "Significance tests require pipelines to be grouped; this uses more memory."
+            )
 
         for corpus_id, corpus_ds, members in self._iter_corpus_groups():
             # If a subset was requested, skip this corpus unless it contains the subset
@@ -492,7 +540,9 @@ class Suite(ABC, metaclass=SuiteMeta):
 
             if coerce_grouped:
                 # Materialise all pipelines ONCE for the corpus
-                pipelines, names = self.coerce_pipelines_grouped(context, ranking_generators)
+                pipelines, names = self.coerce_pipelines_grouped(
+                    context, ranking_generators
+                )
 
                 # Evaluate the same systems across each dataset that shares this corpus
                 for ds_name, ds_id in members:
@@ -527,7 +577,9 @@ class Suite(ABC, metaclass=SuiteMeta):
 
             else:
                 # Stream pipelines one at a time, but reuse each pipeline across ALL member datasets
-                for pipeline, name in self.coerce_pipelines_sequential(context, ranking_generators):
+                for pipeline, name in self.coerce_pipelines_sequential(
+                    context, ranking_generators
+                ):
                     for ds_name, ds_id in members:
                         if subset and ds_name != subset:
                             continue
@@ -555,7 +607,9 @@ class Suite(ABC, metaclass=SuiteMeta):
             # Release per-corpus context
             del context
 
-        results_df = pd.concat(results, ignore_index=True) if results else pd.DataFrame()
+        results_df = (
+            pd.concat(results, ignore_index=True) if results else pd.DataFrame()
+        )
 
         # Aggregate geometric mean only across actual Measure columns
         perquery = experiment_kwargs.get("perquery", False)

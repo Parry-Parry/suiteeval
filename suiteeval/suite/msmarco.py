@@ -13,7 +13,7 @@ document_datasets = [
     "msmarco-document-v2/trec-dl-2022/judged",
     "msmarco-document-v2/trec-dl-2023",
 ]
-measures = [nDCG@10]
+measures = [nDCG @ 10]
 
 MSMARCODocument = Suite.register(
     "msmarco/document",

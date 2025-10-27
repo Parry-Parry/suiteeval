@@ -21,7 +21,7 @@ datasets = [
     "nano-beir/webis-touche2020",
 ]
 
-measures = [nDCG@10]
+measures = [nDCG @ 10]
 
 
 class _NanoBEIR(_BEIR):

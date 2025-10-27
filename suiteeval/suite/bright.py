@@ -10,35 +10,36 @@ from suiteeval.context import DatasetContext
 from suiteeval.suite.base import Suite
 
 datasets = [
-    'bright/aops',
-    'bright/biology',
-    'bright/earth-science',
-    'bright/economics',
-    'bright/leetcode',
-    'bright/pony',
-    'bright/psychology',
-    'bright/robotics',
-    'bright/stackoverflow',
-    'bright/sustainable-living',
-    'bright/theoremqa-questions',
-    'bright/theoremqa-theorems',
+    "bright/aops",
+    "bright/biology",
+    "bright/earth-science",
+    "bright/economics",
+    "bright/leetcode",
+    "bright/pony",
+    "bright/psychology",
+    "bright/robotics",
+    "bright/stackoverflow",
+    "bright/sustainable-living",
+    "bright/theoremqa-questions",
+    "bright/theoremqa-theorems",
 ]
 
-measures = [nDCG@10]
+measures = [nDCG @ 10]
 
 
 class DocumentFilter(pt.Transformer):
     def __init__(self, qrels: pd.DataFrame, filter_value: int = -100):
         super().__init__()
         self._flagged = set(
-            qrels.loc[qrels['relevance'] == filter_value, ['qid', 'docno']]
-            .itertuples(index=False, name=None)
+            qrels.loc[qrels["relevance"] == filter_value, ["qid", "docno"]].itertuples(
+                index=False, name=None
+            )
         )
 
     def transform(self, inp: pd.DataFrame) -> pd.DataFrame:
-        flagged_df = pd.DataFrame(list(self._flagged), columns=['qid', 'docno'])
-        out = inp.merge(flagged_df.assign(_ban=1), on=['qid', 'docno'], how='left')
-        return out[out['_ban'].isna()].drop(columns=['_ban'])
+        flagged_df = pd.DataFrame(list(self._flagged), columns=["qid", "docno"])
+        out = inp.merge(flagged_df.assign(_ban=1), on=["qid", "docno"], how="left")
+        return out[out["_ban"].isna()].drop(columns=["_ban"])
 
 
 class _BRIGHT(Suite):
@@ -48,7 +49,7 @@ class _BRIGHT(Suite):
 
     _datasets = datasets
     _measures = measures
-    _query_field = 'text'
+    _query_field = "text"
     _metadata = {
         "official_measures": measures,
         "description": " BRIGHT is a suite datasets for evaluating retrieval that requires reasoning.",
@@ -76,10 +77,11 @@ class _BRIGHT(Suite):
         Materialise all pipelines (and names) via the superclass, then
         append a dataframe filter for qrels.
         """
-        pipelines, names = super().coerce_pipelines_grouped(context, pipeline_generators)
+        pipelines, names = super().coerce_pipelines_grouped(
+            context, pipeline_generators
+        )
         pipelines = [
-            p >> DocumentFilter(context.dataset.get_qrels())
-            for p in pipelines
+            p >> DocumentFilter(context.dataset.get_qrels()) for p in pipelines
         ]
 
         return pipelines, names

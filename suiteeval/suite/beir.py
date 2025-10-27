@@ -71,7 +71,7 @@ class _BEIR(Suite):
         "official_measures": measures,
         "description": " Beir is a suite of benchmarks to test zero-shot transfer.",
     }
-    _query_field = 'text'
+    _query_field = "text"
 
     def coerce_pipelines_sequential(
         self,
@@ -99,15 +99,14 @@ class _BEIR(Suite):
         Materialise all pipelines (and names) via the superclass, then
         append a dataframe filter only for Quora datasets.
         """
-        pipelines, names = super().coerce_pipelines_grouped(context, pipeline_generators)
+        pipelines, names = super().coerce_pipelines_grouped(
+            context, pipeline_generators
+        )
 
         ds_str = context.dataset._irds_id.lower()
 
         if "quora" in ds_str:
-            pipelines = [
-                p >> pt.apply.generic(dataframe_filter)
-                for p in pipelines
-            ]
+            pipelines = [p >> pt.apply.generic(dataframe_filter) for p in pipelines]
 
         return pipelines, names
 
@@ -164,11 +163,15 @@ class _BEIR(Suite):
         grouping = ["dataset", "name"]
         if perquery:
             grouping.append("qid")
-        cqadupstack = cqadupstack.groupby(grouping).agg(
-            {
-                "value": geometric_mean,
-            }
-        ).reset_index()
+        cqadupstack = (
+            cqadupstack.groupby(grouping)
+            .agg(
+                {
+                    "value": geometric_mean,
+                }
+            )
+            .reset_index()
+        )
         cqadupstack["dataset"] = "beir/cqadupstack"
         results = pd.concat([not_cqadupstack, cqadupstack], ignore_index=True)
 
