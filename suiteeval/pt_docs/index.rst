@@ -1,7 +1,7 @@
 SuiteEval
 ==================================================================================
 
-`suiteeval <https://github.com/seanmacavaney/suiteeval>`__
+`suiteeval <https://github.com/parryparry/suiteeval>`__
 
 Tools for running IR Evaluation Suites
 
