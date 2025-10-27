@@ -10,6 +10,13 @@ if pyterrier_pisa_available():
 def SPLADE(
     ranking_pipeline, checkpoint: str = "naver/splade-cocondenser-ensembledistil"
 ):
+    """
+    Constructs a SPLADE retrieval pipeline generator using PyTerrier-PISA and PyTerrier-SPLADE.
+
+    Args:
+        ranking_pipeline: A PyTerrier pipeline to apply after retrieval.
+        checkpoint: The checkpoint to load the SPLADE model from.
+    """
     if not pyterrier_pisa_available():
         raise ImportError("pyterrier_pisa is required for SPLADE pipeline.")
     if not pyterrier_splade_available():

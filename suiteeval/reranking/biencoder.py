@@ -7,6 +7,13 @@ if pyterrier_dr_available():
 def HgfBiEncoder(
     ranking_pipeline, checkpoint: str = "sentence-transformers/all-mpnet-base-v2"
 ):
+    """
+    Loads a HgfBiEncoder bi-encoder model from the given checkpoint, and constructs a PyTerrier pipeline generator
+
+    Args:
+        ranking_pipeline: A PyTerrier pipeline to apply after retrieval.
+        checkpoint: The checkpoint to load the bi-encoder model from.
+    """
     if not pyterrier_dr_available():
         raise ImportError("pyterrier_dr is required for HgfBiEncoder pipeline.")
 

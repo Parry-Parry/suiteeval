@@ -1,0 +1,271 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>suiteeval &mdash; suiteeval  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="suiteeval.context" href="suiteeval.context.html" />
+    <link rel="prev" title="SuiteEval" href="index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            suiteeval
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">suiteeval</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#suiteeval.DatasetContext"><code class="docutils literal notranslate"><span class="pre">DatasetContext</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#suiteeval.DatasetContext.get_corpus_iter"><code class="docutils literal notranslate"><span class="pre">DatasetContext.get_corpus_iter()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#suiteeval.DatasetContext.text_loader"><code class="docutils literal notranslate"><span class="pre">DatasetContext.text_loader()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#suiteeval.Suite"><code class="docutils literal notranslate"><span class="pre">Suite</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#suiteeval.Suite.__call__"><code class="docutils literal notranslate"><span class="pre">Suite.__call__()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#suiteeval.Suite.coerce_measures"><code class="docutils literal notranslate"><span class="pre">Suite.coerce_measures()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#suiteeval.Suite.coerce_pipelines_grouped"><code class="docutils literal notranslate"><span class="pre">Suite.coerce_pipelines_grouped()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#suiteeval.Suite.coerce_pipelines_sequential"><code class="docutils literal notranslate"><span class="pre">Suite.coerce_pipelines_sequential()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#suiteeval.Suite.compute_overall_mean"><code class="docutils literal notranslate"><span class="pre">Suite.compute_overall_mean()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#suiteeval.Suite.datasets"><code class="docutils literal notranslate"><span class="pre">Suite.datasets</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#suiteeval.Suite.get_measures"><code class="docutils literal notranslate"><span class="pre">Suite.get_measures()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#suiteeval.Suite.parse_measures"><code class="docutils literal notranslate"><span class="pre">Suite.parse_measures()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="suiteeval.context.html">suiteeval.context</a></li>
+<li class="toctree-l2"><a class="reference internal" href="suiteeval.reranking.html">suiteeval.reranking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="suiteeval.suite.html">suiteeval.suite</a></li>
+<li class="toctree-l2"><a class="reference internal" href="suiteeval.utility.html">suiteeval.utility</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">suiteeval</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">suiteeval</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/suiteeval.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-suiteeval">
+<span id="suiteeval"></span><h1>suiteeval<a class="headerlink" href="#module-suiteeval" title="Link to this heading"></a></h1>
+<p>Top-level package for SuiteEval.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="suiteeval.DatasetContext">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">suiteeval.</span></span><span class="sig-name descname"><span class="pre">DatasetContext</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dataset</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/suiteeval/context.html#DatasetContext"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#suiteeval.DatasetContext" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Holds both a PyTerrier Dataset and a filesystem path (for indexes, caches, etc.).</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="suiteeval.DatasetContext.get_corpus_iter">
+<span class="sig-name descname"><span class="pre">get_corpus_iter</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/suiteeval/context.html#DatasetContext.get_corpus_iter"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#suiteeval.DatasetContext.get_corpus_iter" title="Link to this definition"></a></dt>
+<dd><p>Returns an iterator over the corpus documents.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="suiteeval.DatasetContext.text_loader">
+<span class="sig-name descname"><span class="pre">text_loader</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fields</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'*'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/suiteeval/context.html#DatasetContext.text_loader"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#suiteeval.DatasetContext.text_loader" title="Link to this definition"></a></dt>
+<dd><p>Returns a IRDSTextLoader instance for retrieving document texts.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="suiteeval.Suite">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">suiteeval.</span></span><span class="sig-name descname"><span class="pre">Suite</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/suiteeval/suite/base.html#Suite"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#suiteeval.Suite" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ABC</span></code></p>
+<p>Abstract base class for a suite of evaluations.
+Subclasses (and dynamic registrations) must populate:</p>
+<blockquote>
+<div><p>_datasets: dict[str, ir_datasets.Dataset ID]  (or list[str])</p>
+</div></blockquote>
+<dl class="py method">
+<dt class="sig sig-object py" id="suiteeval.Suite.__call__">
+<span class="sig-name descname"><span class="pre">__call__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ranking_generators</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eval_metrics</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subset</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">experiment_kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/suiteeval/suite/base.html#Suite.__call__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#suiteeval.Suite.__call__" title="Link to this definition"></a></dt>
+<dd><p>Call self as a function.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">DataFrame</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="suiteeval.Suite.coerce_measures">
+<span class="sig-name descname"><span class="pre">coerce_measures</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">metadata</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/suiteeval/suite/base.html#Suite.coerce_measures"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#suiteeval.Suite.coerce_measures" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+<dl class="simple">
+<dt>Populate self._measures as a de-duplicated list of Measure objects aggregated from:</dt><dd><ol class="arabic simple">
+<li><p>Global metadata[‘official_measures’]</p></li>
+<li><p>Per-dataset metadata[name][‘official_measures’]</p></li>
+<li><p>ir_datasets documentation[‘official_measures’] for each dataset</p></li>
+</ol>
+</dd>
+</dl>
+<p>Fallback: [<a class="reference external" href="mailto:nDCG&#37;&#52;&#48;10">nDCG<span>&#64;</span>10</a>] if none found.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="suiteeval.Suite.coerce_pipelines_grouped">
+<span class="sig-name descname"><span class="pre">coerce_pipelines_grouped</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">context</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipeline_generators</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/suiteeval/suite/base.html#Suite.coerce_pipelines_grouped"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#suiteeval.Suite.coerce_pipelines_grouped" title="Link to this definition"></a></dt>
+<dd><p>Materialise all pipelines and optional names.
+Use when Experiment must see all systems together (e.g., significance tests).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-data docutils literal notranslate"><span class="pre">Tuple</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">Transformer</span></code>], <code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>]]]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="suiteeval.Suite.coerce_pipelines_sequential">
+<span class="sig-name descname"><span class="pre">coerce_pipelines_sequential</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">context</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pipeline_generators</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/suiteeval/suite/base.html#Suite.coerce_pipelines_sequential"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#suiteeval.Suite.coerce_pipelines_sequential" title="Link to this definition"></a></dt>
+<dd><p>Yield (Transformer, Optional[str]) one at a time, without materialising.
+Use to reduce memory/VRAM footprint.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="suiteeval.Suite.compute_overall_mean">
+<span class="sig-name descname"><span class="pre">compute_overall_mean</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">results</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">eval_metrics</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/suiteeval/suite/base.html#Suite.compute_overall_mean"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#suiteeval.Suite.compute_overall_mean" title="Link to this definition"></a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">DataFrame</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="suiteeval.Suite.datasets">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">datasets</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Generator</span><span class="p"><span class="pre">[</span></span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Dataset</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">None</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">None</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#suiteeval.Suite.datasets" title="Link to this definition"></a></dt>
+<dd><p>&lt;id&gt;”))</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Generator yielding (dataset_name, pt.get_dataset(“irds</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="suiteeval.Suite.get_measures">
+<span class="sig-name descname"><span class="pre">get_measures</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dataset</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/suiteeval/suite/base.html#Suite.get_measures"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#suiteeval.Suite.get_measures" title="Link to this definition"></a></dt>
+<dd><p>Resolve measures for the given dataset name.
+If the suite maintains a single list, return it; otherwise look up per-dataset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">Measure</span></code>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="suiteeval.Suite.parse_measures">
+<em class="property"><span class="k"><span class="pre">static</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">parse_measures</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">measures</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/suiteeval/suite/base.html#Suite.parse_measures"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#suiteeval.Suite.parse_measures" title="Link to this definition"></a></dt>
+<dd><p>Convert a list of measure strings or Measure objects to a flat list[Measure].</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">Measure</span></code>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<p class="rubric">Modules</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="suiteeval.context.html#module-suiteeval.context" title="suiteeval.context"><code class="xref py py-obj docutils literal notranslate"><span class="pre">context</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="suiteeval.reranking.html#module-suiteeval.reranking" title="suiteeval.reranking"><code class="xref py py-obj docutils literal notranslate"><span class="pre">reranking</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="suiteeval.suite.html#module-suiteeval.suite" title="suiteeval.suite"><code class="xref py py-obj docutils literal notranslate"><span class="pre">suite</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="suiteeval.utility.html#module-suiteeval.utility" title="suiteeval.utility"><code class="xref py py-obj docutils literal notranslate"><span class="pre">utility</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="index.html" class="btn btn-neutral float-left" title="SuiteEval" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="suiteeval.context.html" class="btn btn-neutral float-right" title="suiteeval.context" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright .</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

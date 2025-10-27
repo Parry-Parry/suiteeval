@@ -15,14 +15,11 @@ You can install ``suiteeval`` with pip:
 
     pip install suiteeval
 
-Basic Usage
-----------------------------------------------------------------------------------
+API Reference
+=============
 
-TODO
+.. autosummary::
+   :toctree: .
+   :recursive:
 
-API Documentation
-----------------------------------------------------------------------------------
-
-TODO
-
-.. autoclass:: suiteeval.MyAwesomeTransformer
+   suiteeval

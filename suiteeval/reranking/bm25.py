@@ -5,6 +5,12 @@ if pyterrier_pisa_available():
 
 
 def BM25(ranking_pipeline):
+    """
+    Constructs a BM25 retrieval pipeline generator using PyTerrier-PISA.
+
+    Args:
+        ranking_pipeline: A PyTerrier pipeline to apply after retrieval.
+    """
     if not pyterrier_pisa_available():
         raise ImportError("pyterrier_pisa is required for BM25 pipeline.")
 
