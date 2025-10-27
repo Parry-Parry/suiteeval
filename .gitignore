@@ -110,3 +110,4 @@ ENV/
 
 # Misc
 .DS_Store
+pt_docs/_build/
