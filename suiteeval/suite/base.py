@@ -23,11 +23,12 @@ logging = getLogger(__name__)
 
 class SuiteMeta(ABCMeta):
     """
-    Metaclass for Suite:
+    Metaclass for :class:`Suite`.
 
-    - keeps a registry of suite-classes by name
-    - enforces singleton instances per suite-class
-    - provides a .register(...) helper
+    Responsibilities:
+    - Maintain a registry of suite classes by name.
+    - Enforce a singleton instance per suite class (i.e., one instance per subclass).
+    - Provide a :meth:`register` helper to dynamically create and register suites.
     """
 
     _classes: dict[str, type] = {}
@@ -52,10 +53,22 @@ class SuiteMeta(ABCMeta):
         Create (or retrieve) a Suite singleton that wraps the given datasets.
 
         Args:
-            suite_name:  Name of the suite class/instance.
-            datasets:    list of ir_datasets identifiers.
-            names:       Optional list of dataset-display names; defaults to `datasets`.
-            metadata:    Optional list/dict of metadata for each dataset.
+            suite_name: Name to assign to the dynamically created suite subclass.
+            datasets: IRDS dataset identifiers (e.g., ``"msmarco-passage/trec-dl-2019"``).
+            names: Optional display names corresponding one-to-one with ``datasets``.
+                Defaults to ``datasets`` when omitted.
+            metadata: Optional metadata. Accepted forms:
+                * ``None`` → per-dataset empty dicts
+                * ``list[dict]`` → each entry applies to the corresponding dataset in ``names``/``datasets``
+                * ``dict[str, dict]`` → explicit mapping from dataset name/ID to metadata dict
+                * ``dict[str, Any]`` where values are not dicts → treated as flat metadata applied to all
+            query_field: Optional topic field name to use when fetching topics (e.g., ``"title"``).
+
+        Returns:
+            Suite: The singleton instance of the dynamically created suite class.
+
+        Raises:
+            ValueError: If ``metadata`` has an unsupported shape or length.
         """
         # if already registered, return existing instance
         if suite_name in mcs._classes:
@@ -100,9 +113,23 @@ class SuiteMeta(ABCMeta):
 
 class Suite(ABC, metaclass=SuiteMeta):
     """
-    Abstract base class for a suite of evaluations.
-    Subclasses (and dynamic registrations) must populate:
-        _datasets: dict[str, ir_datasets.Dataset ID]  (or list[str])
+    Abstract base class for a set of related evaluations across one or more datasets.
+
+    Subclasses (or classes created via :meth:`SuiteMeta.register`) must populate:
+
+    Attributes:
+        _datasets: Either a ``dict[str, str]`` mapping display name → IRDS dataset ID,
+            or a ``list[str]`` of IRDS dataset IDs.
+        _dataset_ids: Normalized mapping of display name → IRDS dataset ID
+            (filled in by registration helpers).
+        _metadata: Optional per-dataset or global metadata.
+        _measures: A list of :class:`ir_measures.Measure` or a mapping from dataset name
+            to such a list. When not provided, defaults are derived from metadata or
+            IRDS documentation; ultimately falling back to ``[nDCG@10]``.
+        _query_field: Optional topic field name to use when fetching topics.
+
+    Notes:
+        Instances are singletons per subclass (enforced by :class:`SuiteMeta`).
     """
 
     _datasets: Union[list[str], dict[str, str]] = {}
@@ -193,7 +220,20 @@ class Suite(ABC, metaclass=SuiteMeta):
     @staticmethod
     def parse_measures(measures: list[Union[str, Measure]]) -> list[Measure]:
         """
-        Convert a list of measure strings or Measure objects to a flat list[Measure].
+        Convert a list of measure strings or :class:`ir_measures.Measure` objects
+        into a flat ``list[Measure]``.
+
+        Args:
+            measures: A sequence containing measure strings (e.g., ``"nDCG@10"``)
+                and/or :class:`ir_measures.Measure` instances.
+
+        Returns:
+            list[Measure]: Parsed measure objects.
+
+        Raises:
+            ValueError: If a string entry cannot be parsed by either
+                :func:`ir_measures.parse_measure` or :func:`ir_measures.parse_trec_measure`,
+                or if an entry has an invalid type.
         """
         out: list[Measure] = []
 
@@ -226,11 +266,19 @@ class Suite(ABC, metaclass=SuiteMeta):
 
     def coerce_measures(self, metadata: dict[str, Any]) -> None:
         """
-        Populate self._measures as a de-duplicated list of Measure objects aggregated from:
-          1) Global metadata['official_measures']
-          2) Per-dataset metadata[name]['official_measures']
-          3) ir_datasets documentation['official_measures'] for each dataset
-        Fallback: [nDCG@10] if none found.
+        Populate ``self._measures`` by aggregating available sources in priority order:
+
+        1. Global ``metadata['official_measures']`` if present.
+        2. Per-dataset ``metadata[name]['official_measures']`` if present.
+        3. IRDS documentation ``official_measures`` for each dataset (when available).
+
+        If no measures are discovered, default to ``[nDCG@10]``.
+
+        Args:
+            metadata: The suite metadata dictionary as configured at construction time.
+
+        Returns:
+            None
         """
         measures_accum: list[Measure] = []
         seen: set[str] = set()
@@ -279,16 +327,24 @@ class Suite(ABC, metaclass=SuiteMeta):
 
         self._measures = measures_accum
 
-    # ---------------------------
-    # Pipeline coercion helpers
-    # ---------------------------
     @staticmethod
     def _normalize_generators(
         pipeline_generators: Union[Callable[[DatasetContext], Any], runtime_Sequence],
         what: str,
     ) -> list[Callable[[DatasetContext], Any]]:
         """
-        Normalise a callable or a sequence of callables to a list of callables.
+        Normalize a callable or a sequence of callables to a list of callables.
+
+        Args:
+            pipeline_generators: Either a single callable taking ``DatasetContext`` and
+                yielding pipelines, or a sequence of such callables.
+            what: Human-readable label used in error messages.
+
+        Returns:
+            list[Callable[[DatasetContext], Any]]: The normalized list.
+
+        Raises:
+            TypeError: If the input is neither callable nor a sequence of callables.
         """
         if not isinstance(pipeline_generators, runtime_Sequence) or isinstance(
             pipeline_generators, (str, bytes)
@@ -308,8 +364,24 @@ class Suite(ABC, metaclass=SuiteMeta):
         pipeline_generators: Union[Callable[[DatasetContext], Any], runtime_Sequence],
     ):
         """
-        Yield (Transformer, Optional[str]) one at a time, without materialising.
-        Use to reduce memory/VRAM footprint.
+        Yield pipelines lazily, one at a time, without materializing the full set.
+
+        Use this when you want to minimize memory/VRAM footprint and you do not require
+        joint analysis across all systems at once (e.g., significance testing).
+
+        Args:
+            context: The shared :class:`DatasetContext` for the current corpus group.
+            pipeline_generators: Callable or sequence of callables that produce either:
+                * a single :class:`pyterrier.Transformer`,
+                * a sequence of transformers,
+                * a tuple ``(pipelines, name_or_names)`` where names may be a single label
+                applied to all pipelines or a sequence aligned with ``pipelines``.
+
+        Yields:
+            tuple[Transformer, Optional[str]]: The pipeline and an optional display name.
+
+        Raises:
+            ValueError: If a generator yields an invalid structure.
         """
         gens = self._normalize_generators(pipeline_generators, "pipeline_generators")
 
@@ -360,8 +432,23 @@ class Suite(ABC, metaclass=SuiteMeta):
         pipeline_generators: Union[Callable[[DatasetContext], Any], runtime_Sequence],
     ) -> Tuple[list[Transformer], Optional[list[str]]]:
         """
-        Materialise all pipelines and optional names.
-        Use when Experiment must see all systems together (e.g., significance tests).
+        Materialize all pipelines (and optional names) into lists.
+
+        Use this when downstream evaluation requires access to the full set of systems
+        simultaneously (e.g., significance tests).
+
+        Args:
+            context: The shared :class:`DatasetContext` for the current corpus group.
+            pipeline_generators: Callable or sequence of callables following the same
+                conventions as in :meth:`coerce_pipelines_sequential`.
+
+        Returns:
+            tuple[list[Transformer], Optional[list[str]]]:
+                A list of pipelines and, if provided, a list of corresponding names.
+                If no names were supplied, returns ``None`` for the second element.
+
+        Raises:
+            ValueError: If the generators produce no pipelines or an invalid structure.
         """
         gens = self._normalize_generators(pipeline_generators, "pipeline_generators")
 
@@ -424,14 +511,26 @@ class Suite(ABC, metaclass=SuiteMeta):
         )
         return pipelines, final_names
 
-    # ---------------------------
-    # Aggregation utilities
-    # ---------------------------
     def compute_overall_mean(
         self,
         results: pd.DataFrame,
         eval_metrics: Sequence[Any] = None,
     ) -> pd.DataFrame:
+        """
+        Append overall (geometric mean) rows across datasets for each system name.
+
+        This first aggregates per-dataset means over repeated runs, then computes the
+        geometric mean across datasets for each metric and appends rows with
+        ``dataset == "Overall"``.
+
+        Args:
+            results: DataFrame with at least ``["dataset", "name"]`` and metric columns.
+            eval_metrics: Optional sequence of metrics to consider; defaults to
+                ``self.__default_measures`` when not provided.
+
+        Returns:
+            pandas.DataFrame: The input results with additional ``Overall`` rows appended.
+        """
         measure_cols = [
             str(m)
             for m in (eval_metrics or self.__default_measures)
@@ -462,8 +561,15 @@ class Suite(ABC, metaclass=SuiteMeta):
     @cache
     def get_measures(self, dataset: str) -> list[Measure]:
         """
-        Resolve measures for the given dataset name.
-        If the suite maintains a single list, return it; otherwise look up per-dataset.
+        Resolve the measures applicable to a given dataset name.
+
+        Args:
+            dataset: Dataset display name as used in this suite.
+
+        Returns:
+            list[Measure]: The list configured for this dataset (or the suite-wide
+                list if a single list is maintained). Falls back to defaults when the
+                dataset is unknown.
         """
         if isinstance(self._measures, list):
             return self._measures
@@ -474,7 +580,13 @@ class Suite(ABC, metaclass=SuiteMeta):
     @property
     def datasets(self) -> Generator[Tuple[str, pt.datasets.Dataset], None, None]:
         """
-        Generator yielding (dataset_name, pt.get_dataset("irds:<id>"))
+        Iterate over declared datasets yielding display name and PyTerrier dataset.
+
+        Yields:
+            tuple[str, pyterrier.datasets.Dataset]: Pairs of (name, ``pt.get_dataset("irds:<id>")``).
+
+        Raises:
+            ValueError: If ``_datasets`` has an invalid type.
         """
         if isinstance(self._datasets, list):
             for ds_id in self._datasets:
@@ -487,17 +599,30 @@ class Suite(ABC, metaclass=SuiteMeta):
                 "Suite _datasets must be a list or dict mapping names to dataset IDs."
             )
 
-    # ---------------------------
-    # Internal helpers
-    # ---------------------------
     @staticmethod
     def _topics_qrels(ds: pt.datasets.Dataset, query_field: Optional[str]):
+        """
+        Fetch topics and qrels for a dataset.
+
+        Args:
+            ds: A :class:`pyterrier.datasets.Dataset` instance.
+            query_field: Optional topic field name (e.g., ``"title"``).
+
+        Returns:
+            tuple[pandas.DataFrame, pandas.DataFrame]: ``(topics, qrels)``.
+        """
         topics = ds.get_topics(query_field, tokenise_query=False)
         qrels = ds.get_qrels()
         return topics, qrels
 
     @staticmethod
     def _free_cuda():
+        """
+        Best-effort memory cleanup helper.
+
+        Calls ``gc.collect()`` and, if ``torch.cuda.is_available()``, empties the CUDA cache.
+        Silently ignores any exceptions (CUDA and torch are optional).
+        """
         import gc
 
         gc.collect()
@@ -509,9 +634,6 @@ class Suite(ABC, metaclass=SuiteMeta):
         except Exception:
             pass
 
-    # ---------------------------
-    # Main entry point
-    # ---------------------------
     def __call__(
         self,
         ranking_generators: Union[
@@ -521,6 +643,34 @@ class Suite(ABC, metaclass=SuiteMeta):
         subset: Optional[str] = None,
         **experiment_kwargs: dict[str, Any],
     ) -> pd.DataFrame:
+        """
+        Run the experiment(s) for each dataset in the suite and return a results table.
+
+        If a ``baseline`` is provided in ``experiment_kwargs``, all pipelines are
+        materialized together (grouped mode) to enable tests that require joint access
+        (e.g., significance). Otherwise, pipelines are streamed one-by-one to reduce
+        memory usage (sequential mode).
+
+        Args:
+            ranking_generators: Callable or sequence of callables producing pipelines
+                per :class:`DatasetContext` (same conventions as in
+                :meth:`coerce_pipelines_sequential`).
+            eval_metrics: Optional explicit metrics to evaluate; defaults to the suite’s
+                configuration for each dataset.
+            subset: Optional dataset display name to restrict evaluation to a single member.
+            **experiment_kwargs: Additional keyword arguments forwarded to
+                :func:`pyterrier.Experiment`. If ``save_dir`` is provided, it is
+                suffixed per dataset.
+
+        Returns:
+            pandas.DataFrame: The concatenated experiment results. When ``perquery`` is
+                not set, an additional ``Overall`` row is appended per system with
+                geometric-mean aggregation across datasets.
+
+        Notes:
+            This method reuses a single index per corpus group and cleans up GPU memory
+            between pipeline evaluations.
+        """
         results: list[pd.DataFrame] = []
 
         baseline = experiment_kwargs.get("baseline", None)

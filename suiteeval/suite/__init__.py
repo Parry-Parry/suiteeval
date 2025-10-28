@@ -1,3 +1,5 @@
+"""Top-level public API re-exports for suiteeval."""
+
 from suiteeval.suite.base import Suite
 from suiteeval.suite.beir import BEIR
 from suiteeval.suite.lotte import Lotte
