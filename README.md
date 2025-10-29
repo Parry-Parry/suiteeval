@@ -4,6 +4,8 @@ Tools for running IR Evaluation Suites with PyTerrier.
 
 ### Example Usage
 
+The `systems` function defines the retrieval systems to be evaluated. It takes a `context` object as an argument, which provides access to the corpus and other resources needed for indexing and retrieval. The function can either return one or more pipelines or yield pipelines in the case that more complex memory management is required. Here is an example where we only keep one neural re-ranker in memory at a time while evaluating the BEIR suite.
+
 ```python
 from suiteeval import BEIR
 from pyterrier_pisa import PisaIndex
