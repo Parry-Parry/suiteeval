@@ -40,20 +40,11 @@ You can choose to either return named systems (useful for larger evaluation) or 
    :maxdepth: 1
    :caption: Suites
 
-   api/suiteeval.suite.beir
-   api/suiteeval.suite.bright
-   api/suiteeval.suite.lotte
-   api/suiteeval.suite.msmarco
-   api/suiteeval.suite.nanobeir
+   api/suites
 
 .. toctree::
    :maxdepth: 1
    :caption: API Reference
 
    api/suiteeval.suite
-   api/suiteeval.context
-   api/suiteeval.utility
-   api/suiteeval.reranking
-   api/suiteeval.reranking.bm25
-   api/suiteeval.reranking.biencoder
-   api/suiteeval.reranking.splade
+   api/suiteeval.api

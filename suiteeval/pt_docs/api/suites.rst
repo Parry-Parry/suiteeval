@@ -1,6 +1,3 @@
-Availible Suites
-===============
-
 BEIR
 ====
 
