@@ -10,7 +10,7 @@ pip install suiteeval
 
 ## Example Usage
 
-You should define a function which produces `pyterrier` pipelines, if you do not want to lookup an index, the `DatasetContext` object provides tempoary paths and a corpus iterator for indexing.
+You should define a function which produces `pyterrier` pipelines, if you do not want to lookup an index, the `DatasetContext` object provides temporary paths and a corpus iterator for indexing.
 
 The function can either return one or more pipelines or yield pipelines in the case that more complex memory management is required. Here is an example where we only keep one neural re-ranker in memory at a time while evaluating the BEIR suite.
 
