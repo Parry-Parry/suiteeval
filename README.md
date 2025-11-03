@@ -1,21 +1,51 @@
 # 🍬 SuiteEval
 
-Tools for running IR Evaluation Suites with PyTerrier.
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+[![PyTerrier](https://img.shields.io/badge/PyTerrier-Compatible-orange)](https://github.com/terrier-org/pyterrier)
 
-## Installation
+Tools for running **IR evaluation suites** with [PyTerrier](https://github.com/terrier-org/pyterrier).  
+SuiteEval helps you define, run, and aggregate evaluations across datasets while managing temporary indices and memory footprint.
 
-```
+## 📘 Overview
+
+**SuiteEval** provides:
+- Declaration of **pipelines** (BM25, dense, re-ranking chains).
+- Execution of **evaluation suites** (e.g., BEIR-style benchmarks).
+- **DatasetContext** utilities for temporary paths and text loading.
+- **DataFrame** outputs for downstream analysis.
+
+Workflow:
+1) Implement `pipelines(context)` that yields one or more PyTerrier pipelines (optionally named).  
+2) Pass it to a suite (e.g., `BEIR`).  
+3) Analyse the returned DataFrame.
+
+## 🚀 Getting Started
+
+### Install from PyPI
+```bash
 pip install suiteeval
 ```
+### Install from source
+```bash
+git clone https://github.com/<your-username>/suiteeval.git
+cd suiteeval
+pip install -e .
+```
 
-## Example Usage
+## ⚙️ Defining Pipelines
 
-You should define a function which produces `pyterrier` pipelines, if you do not want to lookup an index, the `DatasetContext` object provides temporary paths and a corpus iterator for indexing.
+Write a callable that accepts a `DatasetContext` and **returns or yields** pipelines.
 
-The function can either return one or more pipelines or yield pipelines in the case that more complex memory management is required. Here is an example where we only keep one neural re-ranker in memory at a time while evaluating the BEIR suite.
+- **Return** a list/tuple of pipelines or `(pipeline, name)` pairs; **or**  
+- **Yield** pipelines to keep only one large model resident in memory.
 
-You can choose to either return named systems (useful for larger evaluation) or just return the systems!
+`DatasetContext` provides:
+- `context.path` — temporary working directory for indices/artifacts.  
+- `context.get_corpus_iter()` — iterator suitable for indexing.  
+- `context.text_loader()` — attaches document text for re-ranking.
 
+### Example
 ```python
 from suiteeval import BEIR
 from pyterrier_pisa import PisaIndex
@@ -25,9 +55,45 @@ from pyterrier_t5 import MonoT5ReRanker
 def pipelines(context):
     index = PisaIndex(context.path + "/index.pisa")
     index.index(context.get_corpus_iter())
+
     bm25 = index.bm25()
-    yield bm25 >> context.text_loader() >>  MonoT5ReRanker(), "BM25 >> monoT5"
+    yield bm25 >> context.text_loader() >> MonoT5ReRanker(), "BM25 >> monoT5"
     yield bm25 >> context.text_loader() >> ElectraScorer(), "BM25 >> monoELECTRA"
 
 results = BEIR(pipelines)
 ```
+
+## 🧪 Running Suites
+
+Entry points (e.g., `BEIR`) accept your pipeline factory and return a DataFrame:
+
+```python
+results = BEIR(pipelines)  # per-dataset metrics and system names (if provided)
+```
+
+## 📦 Reproducibility & Resource Management
+
+- **Temporary indices** live under `context.path` and are cleaned up.  
+- Prefer **yielding** pipelines when using large models.  
+- Name systems via `(pipeline, "<name>")` for clear result tables and logs.
+
+## 🛠️ Compatibility
+
+Works with modern PyTerrier and common extensions  
+(e.g., `pyterrier_pisa`, `pyterrier_dr`, `pyterrier_t5`).  
+For older environments, ensure standard PyTerrier transformer interfaces.
+
+## 👥 Authors
+
+- [Andrew Parry](mailto:a.parry.1@research.gla.ac.uk)
+- [Sean MacAvaney](mailto:Sean.MacAvaney@glasgow.ac.uk)
+
+## 🧾 Version History
+
+| Version | Date       | Changes        |
+|-------:|------------|----------------|
+|    0.1 | 2025-11-03 | Initial README |
+
+## License
+
+This project is licensed under the **MIT License** — see the [LICENSE](./LICENSE) file for details.
