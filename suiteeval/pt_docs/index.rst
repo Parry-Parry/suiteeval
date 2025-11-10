@@ -38,13 +38,7 @@ You can choose to either return named systems (useful for larger evaluation) or 
 
 .. toctree::
    :maxdepth: 1
-   :caption: Suites
+   :caption: Contents
 
-   api/suites
-
-.. toctree::
-   :maxdepth: 1
-   :caption: API Reference
-
-   api/suiteeval.suite
-   api/suiteeval.api
+   Suites <suites>
+   API Reference <api>
