@@ -737,7 +737,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                 pipelines, names = self.coerce_pipelines_grouped(
                     context, ranking_generators
                 )
-
+                save_dir = experiment_kwargs.pop("save_dir", None)
                 # Evaluate the same systems across each dataset that shares this corpus
                 for ds_name, ds_id_or_obj in members:
                     if subset and ds_name != subset:
@@ -746,7 +746,6 @@ class Suite(ABC, metaclass=SuiteMeta):
                     ds_member = self._get_dataset_object(ds_id_or_obj)
                     topics, qrels = self._topics_qrels(ds_member, self._query_field)
 
-                    save_dir = experiment_kwargs.pop("save_dir", None)
                     if save_dir is not None:
                         if not isinstance(ds_name, str):
                             ds_name = self._get_irds_id(ds_name)
@@ -774,6 +773,7 @@ class Suite(ABC, metaclass=SuiteMeta):
 
             else:
                 # Stream pipelines one at a time, but reuse each pipeline across ALL member datasets
+                save_dir = experiment_kwargs.pop("save_dir", None)
                 for pipeline, name in self.coerce_pipelines_sequential(
                     context, ranking_generators
                 ):
