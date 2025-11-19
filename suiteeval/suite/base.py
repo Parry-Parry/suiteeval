@@ -585,6 +585,7 @@ class Suite(ABC, metaclass=SuiteMeta):
     def datasets(self) -> Generator[Tuple[str, pt.datasets.Dataset], None, None]:
         """
         Iterate over declared datasets yielding display name and PyTerrier dataset.
+        TODO: Add dataset validation when not str
 
         Yields:
             tuple[str, pyterrier.datasets.Dataset]: Pairs of (name, ``pt.get_dataset("irds:<id>")``).
@@ -594,10 +595,12 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         if isinstance(self._datasets, list):
             for ds_id in self._datasets:
-                yield ds_id, pt.get_dataset(f"irds:{ds_id}")
+                dataset = pt.get_dataset(f"irds:{ds_id}") if isinstance(ds_id, str) else ds_id
+                yield ds_id, dataset
         elif isinstance(self._datasets, dict):
             for name, ds_id in self._datasets.items():
-                yield name, pt.get_dataset(f"irds:{ds_id}")
+                dataset = pt.get_dataset(f"irds:{ds_id}") if isinstance(ds_id, str) else ds_id
+                yield name, dataset
         else:
             raise ValueError(
                 "Suite _datasets must be a list or dict mapping names to dataset IDs."
