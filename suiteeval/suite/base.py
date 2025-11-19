@@ -615,7 +615,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         Returns:
             tuple[pandas.DataFrame, pandas.DataFrame]: ``(topics, qrels)``.
         """
-        topics = ds.get_topics(query_field, tokenise_query=False)
+        topics = ds.get_topics(query_field)
         qrels = ds.get_qrels()
         return topics, qrels
 
