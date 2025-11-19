@@ -25,14 +25,23 @@ class DatasetContext:
     def text_loader(self, fields: Union[List[str], str, Literal["*"]] = "*"):
         """
         Returns a IRDSTextLoader instance for retrieving document texts.
+
+        Args:
+            fields: Fields to load; can be a list of field names, a single
+                    field name, or "*" for all fields.
+        Returns:
+            An IRDSTextLoader instance.
         """
         return self.dataset.text_loader(fields=fields)
 
-    def get_corpus_iter(self):
+    def get_corpus_iter(self, **iter_kwargs):
         """
         Returns an iterator over the corpus documents.
+
+        Args:
+            **iter_kwargs: Keyword arguments passed to `get_corpus_iter`.
         """
-        return self.dataset.get_corpus_iter()
+        return self.dataset.get_corpus_iter(**iter_kwargs)
 
 
 __all__ = ["DatasetContext"]
