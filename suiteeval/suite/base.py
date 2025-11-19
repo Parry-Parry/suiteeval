@@ -280,6 +280,10 @@ class Suite(ABC, metaclass=SuiteMeta):
         Returns:
             None
         """
+
+        if self._measures is not None:
+            return
+
         measures_accum: list[Measure] = []
         seen: set[str] = set()
 
