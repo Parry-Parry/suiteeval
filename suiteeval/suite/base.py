@@ -182,6 +182,36 @@ class Suite(ABC, metaclass=SuiteMeta):
     # ---------------------------
     # Corpus grouping
     # ---------------------------
+    @staticmethod
+    def _get_irds_id(ds_id_or_obj: Any) -> str:
+        """
+        Extract the IRDS ID from either a string ID or a dataset object.
+
+        Args:
+            ds_id_or_obj: Either a string IRDS ID or an object with `_irds_id` attribute.
+
+        Returns:
+            str: The IRDS ID.
+        """
+        if isinstance(ds_id_or_obj, str):
+            return ds_id_or_obj
+        return ds_id_or_obj._irds_id
+
+    @staticmethod
+    def _get_dataset_object(ds_id_or_obj: Any) -> pt.datasets.Dataset:
+        """
+        Get a PyTerrier Dataset object from either a string ID or a dataset object.
+
+        Args:
+            ds_id_or_obj: Either a string IRDS ID or a dataset object.
+
+        Returns:
+            pt.datasets.Dataset: The dataset object.
+        """
+        if isinstance(ds_id_or_obj, str):
+            return pt.get_dataset(f"irds:{ds_id_or_obj}")
+        return ds_id_or_obj
+
     def _iter_corpus_groups(self):
         """
         Yield groups of datasets that share the same underlying corpus, determined by
@@ -201,26 +231,20 @@ class Suite(ABC, metaclass=SuiteMeta):
         # group by docs-parent (corpus) id
         groups: dict[str, dict] = {}
         for name, ds_id_or_obj in items:
-            # Only attempt IRDS corpus lookup for string IDs
-            if isinstance(ds_id_or_obj, str):
-                try:
-                    corpus_id = irds.docs_parent_id(ds_id_or_obj) or ds_id_or_obj
-                except Exception:
-                    corpus_id = ds_id_or_obj
+            # Get the IRDS ID and determine corpus parent
+            irds_id = self._get_irds_id(ds_id_or_obj)
+            try:
+                corpus_id = irds.docs_parent_id(irds_id) or irds_id
+            except Exception:
+                corpus_id = irds_id
 
-                if corpus_id not in groups:
-                    groups[corpus_id] = {
-                        "corpus_ds": pt.get_dataset(f"irds:{corpus_id}"),
-                        "members": [],
-                    }
-            else:
-                # For non-string datasets, use the object itself as corpus identifier
-                corpus_id = id(ds_id_or_obj)
-                if corpus_id not in groups:
-                    groups[corpus_id] = {
-                        "corpus_ds": ds_id_or_obj,
-                        "members": [],
-                    }
+            if corpus_id not in groups:
+                # Load the corpus dataset (handles both string IDs and objects)
+                corpus_ds = self._get_dataset_object(corpus_id if isinstance(corpus_id, str) else irds_id)
+                groups[corpus_id] = {
+                    "corpus_ds": corpus_ds,
+                    "members": [],
+                }
 
             groups[corpus_id]["members"].append((name, ds_id_or_obj))
 
@@ -599,21 +623,20 @@ class Suite(ABC, metaclass=SuiteMeta):
     def datasets(self) -> Generator[Tuple[str, pt.datasets.Dataset], None, None]:
         """
         Iterate over declared datasets yielding display name and PyTerrier dataset.
-        TODO: Add dataset validation when not str
 
         Yields:
-            tuple[str, pyterrier.datasets.Dataset]: Pairs of (name, ``pt.get_dataset("irds:<id>")``).
+            tuple[str, pyterrier.datasets.Dataset]: Pairs of (name, dataset object).
 
         Raises:
             ValueError: If ``_datasets`` has an invalid type.
         """
         if isinstance(self._datasets, list):
-            for ds_id in self._datasets:
-                dataset = pt.get_dataset(f"irds:{ds_id}") if isinstance(ds_id, str) else ds_id
-                yield ds_id, dataset
+            for ds_id_or_obj in self._datasets:
+                dataset = self._get_dataset_object(ds_id_or_obj)
+                yield ds_id_or_obj, dataset
         elif isinstance(self._datasets, dict):
-            for name, ds_id in self._datasets.items():
-                dataset = pt.get_dataset(f"irds:{ds_id}") if isinstance(ds_id, str) else ds_id
+            for name, ds_id_or_obj in self._datasets.items():
+                dataset = self._get_dataset_object(ds_id_or_obj)
                 yield name, dataset
         else:
             raise ValueError(
@@ -720,7 +743,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                     if subset and ds_name != subset:
                         continue
 
-                    ds_member = pt.get_dataset(f"irds:{ds_id_or_obj}") if isinstance(ds_id_or_obj, str) else ds_id_or_obj
+                    ds_member = self._get_dataset_object(ds_id_or_obj)
                     topics, qrels = self._topics_qrels(ds_member, self._query_field)
 
                     save_dir = experiment_kwargs.pop("save_dir", None)
@@ -756,7 +779,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                         if subset and ds_name != subset:
                             continue
 
-                        ds_member = pt.get_dataset(f"irds:{ds_id_or_obj}") if isinstance(ds_id_or_obj, str) else ds_id_or_obj
+                        ds_member = self._get_dataset_object(ds_id_or_obj)
                         topics, qrels = self._topics_qrels(ds_member, self._query_field)
 
                         df = pt.Experiment(
