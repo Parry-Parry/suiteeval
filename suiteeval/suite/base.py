@@ -773,7 +773,6 @@ class Suite(ABC, metaclass=SuiteMeta):
 
             else:
                 # Stream pipelines one at a time, but reuse each pipeline across ALL member datasets
-                save_dir = experiment_kwargs.pop("save_dir", None)
                 for pipeline, name in self.coerce_pipelines_sequential(
                     context, ranking_generators
                 ):
