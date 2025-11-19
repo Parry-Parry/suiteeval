@@ -158,7 +158,8 @@ class Suite(ABC, metaclass=SuiteMeta):
             raise AssertionError(
                 "Suite _datasets must be a dict[name->id] or a list[dataset_id]"
             )
-
+        """
+        TODO: Allow validation of non-string datasets
         if isinstance(self._datasets, dict):
             if not all(
                 isinstance(k, str) and isinstance(v, str)
@@ -172,6 +173,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                 raise AssertionError(
                     "Suite _datasets list must contain dataset IDs (str)"
                 )
+        """
 
         assert self._measures is not None, (
             "Suite must have measures defined in _measures"
