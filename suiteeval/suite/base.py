@@ -748,6 +748,8 @@ class Suite(ABC, metaclass=SuiteMeta):
 
                     save_dir = experiment_kwargs.pop("save_dir", None)
                     if save_dir is not None:
+                        if not isinstance(ds_name, str):
+                            ds_name = self._get_dataset_object(ds_name)
                         formatted_ds_name = ds_name.replace("/", "-").lower()
                         ds_save_dir = f"{save_dir}/{formatted_ds_name}"
                         experiment_kwargs["save_dir"] = ds_save_dir
