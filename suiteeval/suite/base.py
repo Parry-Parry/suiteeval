@@ -773,6 +773,7 @@ class Suite(ABC, metaclass=SuiteMeta):
 
             else:
                 # Stream pipelines one at a time, but reuse each pipeline across ALL member datasets
+                save_dir = experiment_kwargs.pop("save_dir", None)
                 for pipeline, name in self.coerce_pipelines_sequential(
                     context, ranking_generators
                 ):
@@ -782,6 +783,14 @@ class Suite(ABC, metaclass=SuiteMeta):
 
                         ds_member = self._get_dataset_object(ds_id_or_obj)
                         topics, qrels = self._topics_qrels(ds_member, self._query_field)
+
+                        if save_dir is not None:
+                            if not isinstance(ds_name, str):
+                                ds_name = self._get_irds_id(ds_name)
+                            formatted_ds_name = ds_name.replace("/", "-").lower()
+                            ds_save_dir = f"{save_dir}/{formatted_ds_name}"
+                            experiment_kwargs["save_dir"] = ds_save_dir
+                            os.makedirs(ds_save_dir, exist_ok=True)
 
                         df = pt.Experiment(
                             [pipeline],
