@@ -190,9 +190,9 @@ class Suite(ABC, metaclass=SuiteMeta):
         Yields:
             (corpus_id: str,
              corpus_ds: pt.datasets.Dataset,
-             members: list[tuple[str, str]])  # [(display_name, dataset_id), ...]
+             members: list[tuple[str, Any]])  # [(display_name, dataset_id_or_obj), ...]
         """
-        # normalise to a list of (name, ds_id)
+        # normalise to a list of (name, ds_id_or_obj)
         if isinstance(self._datasets, dict):
             items = list(self._datasets.items())
         else:
@@ -200,18 +200,29 @@ class Suite(ABC, metaclass=SuiteMeta):
 
         # group by docs-parent (corpus) id
         groups: dict[str, dict] = {}
-        for name, ds_id in items:
-            try:
-                corpus_id = irds.docs_parent_id(ds_id) or ds_id
-            except Exception:
-                corpus_id = ds_id
+        for name, ds_id_or_obj in items:
+            # Only attempt IRDS corpus lookup for string IDs
+            if isinstance(ds_id_or_obj, str):
+                try:
+                    corpus_id = irds.docs_parent_id(ds_id_or_obj) or ds_id_or_obj
+                except Exception:
+                    corpus_id = ds_id_or_obj
 
-            if corpus_id not in groups:
-                groups[corpus_id] = {
-                    "corpus_ds": pt.get_dataset(f"irds:{corpus_id}"),
-                    "members": [],
-                }
-            groups[corpus_id]["members"].append((name, ds_id))
+                if corpus_id not in groups:
+                    groups[corpus_id] = {
+                        "corpus_ds": pt.get_dataset(f"irds:{corpus_id}"),
+                        "members": [],
+                    }
+            else:
+                # For non-string datasets, use the object itself as corpus identifier
+                corpus_id = id(ds_id_or_obj)
+                if corpus_id not in groups:
+                    groups[corpus_id] = {
+                        "corpus_ds": ds_id_or_obj,
+                        "members": [],
+                    }
+
+            groups[corpus_id]["members"].append((name, ds_id_or_obj))
 
         # deterministic iteration order (insertion order is fine here)
         for corpus_id, g in groups.items():
@@ -705,11 +716,11 @@ class Suite(ABC, metaclass=SuiteMeta):
                 )
 
                 # Evaluate the same systems across each dataset that shares this corpus
-                for ds_name, ds_id in members:
+                for ds_name, ds_id_or_obj in members:
                     if subset and ds_name != subset:
                         continue
 
-                    ds_member = pt.get_dataset(f"irds:{ds_id}")
+                    ds_member = pt.get_dataset(f"irds:{ds_id_or_obj}") if isinstance(ds_id_or_obj, str) else ds_id_or_obj
                     topics, qrels = self._topics_qrels(ds_member, self._query_field)
 
                     save_dir = experiment_kwargs.pop("save_dir", None)
@@ -741,11 +752,11 @@ class Suite(ABC, metaclass=SuiteMeta):
                 for pipeline, name in self.coerce_pipelines_sequential(
                     context, ranking_generators
                 ):
-                    for ds_name, ds_id in members:
+                    for ds_name, ds_id_or_obj in members:
                         if subset and ds_name != subset:
                             continue
 
-                        ds_member = pt.get_dataset(f"irds:{ds_id}")
+                        ds_member = pt.get_dataset(f"irds:{ds_id_or_obj}") if isinstance(ds_id_or_obj, str) else ds_id_or_obj
                         topics, qrels = self._topics_qrels(ds_member, self._query_field)
 
                         df = pt.Experiment(
