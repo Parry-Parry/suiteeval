@@ -4,6 +4,7 @@ from abc import ABCMeta, ABC
 import builtins
 from collections.abc import Sequence as runtime_Sequence, Iterator
 import inspect
+import os
 from functools import cache
 from typing import Callable, Generator, Optional, Any, Tuple, Union, Sequence
 from logging import getLogger
@@ -714,6 +715,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                         formatted_ds_name = ds_name.replace("/", "-").lower()
                         ds_save_dir = f"{save_dir}/{formatted_ds_name}"
                         experiment_kwargs["save_dir"] = ds_save_dir
+                        os.makedirs(ds_save_dir, exist_ok=True)
 
                     df = pt.Experiment(
                         pipelines,
