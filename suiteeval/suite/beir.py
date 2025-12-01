@@ -160,16 +160,18 @@ class _BEIR(Suite):
             ~results["dataset"].str.startswith("beir/cqadupstack/")
         ]
 
-        grouping = ["dataset", "name"]
+        # Group by name (and qid if perquery) to aggregate across cqadupstack sub-datasets
+        grouping = ["name"]
         if perquery:
             grouping.append("qid")
+
+        # Determine which metric columns to aggregate (exclude non-metric columns)
+        metric_cols = [col for col in cqadupstack.columns if col not in grouping + ["dataset", "name", "qid"]]
+        agg_dict = {col: geometric_mean for col in metric_cols}
+
         cqadupstack = (
             cqadupstack.groupby(grouping)
-            .agg(
-                {
-                    "value": geometric_mean,
-                }
-            )
+            .agg(agg_dict)
             .reset_index()
         )
         cqadupstack["dataset"] = "beir/cqadupstack"
