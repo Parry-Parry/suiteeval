@@ -740,6 +740,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                 save_dir = experiment_kwargs.pop("save_dir", None)
                 # Evaluate the same systems across each dataset that shares this corpus
                 for ds_name, ds_id_or_obj in members:
+                    kwargs = experiment_kwargs.copy()
                     if subset and ds_name != subset:
                         continue
 
@@ -751,7 +752,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                             ds_name = self._get_irds_id(ds_name)
                         formatted_ds_name = ds_name.replace("/", "-").lower()
                         ds_save_dir = f"{save_dir}/{formatted_ds_name}"
-                        experiment_kwargs["save_dir"] = ds_save_dir
+                        kwargs["save_dir"] = ds_save_dir
                         os.makedirs(ds_save_dir, exist_ok=True)
 
                     df = pt.Experiment(
@@ -760,7 +761,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                         topics=topics,
                         qrels=qrels,
                         names=names,
-                        **experiment_kwargs,
+                        **kwargs,
                     )
                     df["dataset"] = ds_name
                     results.append(df)
@@ -777,6 +778,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                 for pipeline, name in self.coerce_pipelines_sequential(
                     context, ranking_generators
                 ):
+                    kwargs = experiment_kwargs.copy()
                     for ds_name, ds_id_or_obj in members:
                         if subset and ds_name != subset:
                             continue
@@ -789,7 +791,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                                 ds_name = self._get_irds_id(ds_name)
                             formatted_ds_name = ds_name.replace("/", "-").lower()
                             ds_save_dir = f"{save_dir}/{formatted_ds_name}"
-                            experiment_kwargs["save_dir"] = ds_save_dir
+                            kwargs["save_dir"] = ds_save_dir
                             os.makedirs(ds_save_dir, exist_ok=True)
 
                         df = pt.Experiment(
@@ -798,7 +800,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                             topics=topics,
                             qrels=qrels,
                             names=None if name is None else [name],
-                            **experiment_kwargs,
+                            **kwargs,
                         )
                         df["dataset"] = ds_name
                         results.append(df)
