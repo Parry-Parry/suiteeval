@@ -678,6 +678,117 @@ class Suite(ABC, metaclass=SuiteMeta):
         except Exception:
             pass
 
+    def _partition_datasets_by_cache_status(
+        self,
+        members: list[tuple[str, Any]],
+        save_dir: str,
+        pipeline_names: list[Optional[str]],
+    ) -> tuple[list[tuple[str, Any]], list[tuple[str, Any]]]:
+        """
+        Partition datasets into cached and needs_computation groups.
+
+        A dataset is considered cached if ALL pipelines have existing run files in save_dir.
+
+        Args:
+            members: List of (dataset_name, dataset_id_or_obj) tuples for a corpus group.
+            save_dir: The base save directory where run files are stored.
+            pipeline_names: List of pipeline names (should match yielded names from generators).
+
+        Returns:
+            tuple: (cached_datasets, needs_compute_datasets) where each is a list of
+                (dataset_name, dataset_id_or_obj) tuples.
+        """
+        cached_datasets = []
+        needs_compute_datasets = []
+
+        for ds_name, ds_id_or_obj in members:
+            # Normalize dataset name to match file naming convention
+            formatted_ds_name = (
+                ds_name
+                if isinstance(ds_name, str)
+                else self._get_irds_id(ds_name)
+            )
+            formatted_ds_name = formatted_ds_name.replace("/", "-").lower()
+
+            # Check if ALL pipelines are cached for this dataset
+            all_cached = True
+            for pipeline_name in pipeline_names:
+                # Handle None pipeline names (unnamed pipelines)
+                if pipeline_name is None:
+                    all_cached = False
+                    break
+
+                run_file = f"{save_dir}/{formatted_ds_name}/{pipeline_name}.gz"
+                if not os.path.exists(run_file):
+                    all_cached = False
+                    break
+
+            if all_cached and pipeline_names and all(
+                p is not None for p in pipeline_names
+            ):
+                cached_datasets.append((ds_name, ds_id_or_obj))
+            else:
+                needs_compute_datasets.append((ds_name, ds_id_or_obj))
+
+        return cached_datasets, needs_compute_datasets
+
+    def _load_cached_results(
+        self,
+        save_dir: str,
+        dataset_name: str,
+        pipeline_name: str,
+        topics: pd.DataFrame,
+        qrels: pd.DataFrame,
+        eval_metrics: Sequence[Any],
+    ) -> tuple[Optional[Transformer], pd.DataFrame]:
+        """
+        Load cached TREC-format run results and compute metrics.
+
+        Returns both a transformer (for grouped mode/significance tests) and metrics DataFrame.
+
+        Args:
+            save_dir: The base save directory where run files are stored.
+            dataset_name: The dataset name (will be formatted to match file paths).
+            pipeline_name: The pipeline/system name (used to construct file path).
+            topics: Topics DataFrame for the dataset.
+            qrels: Qrels DataFrame for the dataset.
+            eval_metrics: Metrics to compute from the loaded rankings.
+
+        Returns:
+            tuple: (transformer, metrics_df) where transformer can be used in pt.Experiment()
+                and metrics_df contains precomputed metrics. Returns (None, empty_df) on error.
+        """
+        formatted_ds_name = dataset_name.replace("/", "-").lower()
+        run_file = f"{save_dir}/{formatted_ds_name}/{pipeline_name}.gz"
+
+        try:
+            # Load the cached TREC-format results
+            results = pt.io.read_results(run_file)
+
+            # Create a transformer from the cached results for grouped mode support
+            cached_transformer = pt.Transformer.from_df(results)
+
+            # Compute metrics from the loaded results
+            metrics_df = pt.evaluate(
+                results,
+                qrels,
+                eval_metrics=eval_metrics,
+                perquery=False,
+                batch_size=None,
+            )
+
+            # Ensure the output has the expected columns
+            metrics_df["name"] = pipeline_name
+            return cached_transformer, metrics_df
+
+        except Exception as e:
+            logging.warning(
+                f"Failed to load cached results for {pipeline_name} on {dataset_name} "
+                f"from {run_file}: {e}. This run will be skipped."
+            )
+            # Return None, empty to skip this run
+            return None, pd.DataFrame()
+
     def __call__(
         self,
         ranking_generators: Union[
@@ -685,6 +796,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         ],
         eval_metrics: Sequence[Any] = None,
         subset: Optional[str] = None,
+        skip_existing: bool = False,
         **experiment_kwargs: dict[str, Any],
     ) -> pd.DataFrame:
         """
@@ -699,9 +811,12 @@ class Suite(ABC, metaclass=SuiteMeta):
             ranking_generators: Callable or sequence of callables producing pipelines
                 per :class:`DatasetContext` (same conventions as in
                 :meth:`coerce_pipelines_sequential`).
-            eval_metrics: Optional explicit metrics to evaluate; defaults to the suite’s
+            eval_metrics: Optional explicit metrics to evaluate; defaults to the suite's
                 configuration for each dataset.
             subset: Optional dataset display name to restrict evaluation to a single member.
+            skip_existing: If True and ``save_dir`` is provided, skip evaluation for
+                datasets where all pipeline run files already exist in ``save_dir``.
+                Cached results are loaded from disk instead. Default is False.
             **experiment_kwargs: Additional keyword arguments forwarded to
                 :func:`pyterrier.Experiment`. If ``save_dir`` is provided, it is
                 suffixed per dataset.
@@ -738,8 +853,18 @@ class Suite(ABC, metaclass=SuiteMeta):
                     context, ranking_generators
                 )
                 save_dir = experiment_kwargs.pop("save_dir", None)
-                # Evaluate the same systems across each dataset that shares this corpus
-                for ds_name, ds_id_or_obj in members:
+
+                # If skip_existing is enabled, partition datasets
+                if skip_existing and save_dir is not None:
+                    cached_datasets, needs_compute_datasets = (
+                        self._partition_datasets_by_cache_status(members, save_dir, names)
+                    )
+                else:
+                    cached_datasets = []
+                    needs_compute_datasets = list(members)
+
+                # Evaluate the same systems across each dataset that needs computation
+                for ds_name, ds_id_or_obj in needs_compute_datasets:
                     kwargs = experiment_kwargs.copy()
                     if subset and ds_name != subset:
                         continue
@@ -766,6 +891,34 @@ class Suite(ABC, metaclass=SuiteMeta):
                     df["dataset"] = ds_name
                     results.append(df)
 
+                # Load and append cached results (grouped mode)
+                if skip_existing and save_dir is not None:
+                    for ds_name, ds_id_or_obj in cached_datasets:
+                        if subset and ds_name != subset:
+                            continue
+
+                        ds_member = self._get_dataset_object(ds_id_or_obj)
+                        topics, qrels = self._topics_qrels(ds_member, self._query_field)
+
+                        if not isinstance(ds_name, str):
+                            ds_name = self._get_irds_id(ds_name)
+
+                        for pipeline_name in names:
+                            if pipeline_name is None:
+                                continue
+
+                            cached_transformer, metrics_df = self._load_cached_results(
+                                save_dir,
+                                ds_name,
+                                pipeline_name,
+                                topics,
+                                qrels,
+                                eval_metrics or self.get_measures(ds_name),
+                            )
+                            if not metrics_df.empty:
+                                metrics_df["dataset"] = ds_name
+                                results.append(metrics_df)
+
                 # Release materialised pipelines after all member datasets are processed
                 try:
                     del pipelines, names
@@ -775,18 +928,34 @@ class Suite(ABC, metaclass=SuiteMeta):
             else:
                 # Stream pipelines one at a time, but reuse each pipeline across ALL member datasets
                 save_dir = experiment_kwargs.pop("save_dir", None)
-                for pipeline, name in self.coerce_pipelines_sequential(
-                    context, ranking_generators
-                ):
-                    kwargs = experiment_kwargs.copy()
-                    for ds_name, ds_id_or_obj in members:
-                        if subset and ds_name != subset:
-                            continue
 
-                        ds_member = self._get_dataset_object(ds_id_or_obj)
-                        topics, qrels = self._topics_qrels(ds_member, self._query_field)
+                # If skip_existing is enabled, pre-collect pipeline names and partition datasets
+                if skip_existing and save_dir is not None:
+                    # Collect all pipelines and names first
+                    all_pipelines = list(
+                        self.coerce_pipelines_sequential(context, ranking_generators)
+                    )
+                    pipeline_names = [name for _, name in all_pipelines]
 
-                        if save_dir is not None:
+                    # Partition datasets
+                    cached_datasets, needs_compute_datasets = (
+                        self._partition_datasets_by_cache_status(
+                            members, save_dir, pipeline_names
+                        )
+                    )
+
+                    # Evaluate only datasets needing computation
+                    for pipeline, name in all_pipelines:
+                        kwargs = experiment_kwargs.copy()
+                        for ds_name, ds_id_or_obj in needs_compute_datasets:
+                            if subset and ds_name != subset:
+                                continue
+
+                            ds_member = self._get_dataset_object(ds_id_or_obj)
+                            topics, qrels = self._topics_qrels(
+                                ds_member, self._query_field
+                            )
+
                             if not isinstance(ds_name, str):
                                 ds_name = self._get_irds_id(ds_name)
                             formatted_ds_name = ds_name.replace("/", "-").lower()
@@ -794,22 +963,89 @@ class Suite(ABC, metaclass=SuiteMeta):
                             kwargs["save_dir"] = ds_save_dir
                             os.makedirs(ds_save_dir, exist_ok=True)
 
-                        df = pt.Experiment(
-                            [pipeline],
-                            eval_metrics=eval_metrics or self.get_measures(ds_name),
-                            topics=topics,
-                            qrels=qrels,
-                            names=None if name is None else [name],
-                            **kwargs,
-                        )
-                        df["dataset"] = ds_name
-                        results.append(df)
+                            df = pt.Experiment(
+                                [pipeline],
+                                eval_metrics=eval_metrics or self.get_measures(ds_name),
+                                topics=topics,
+                                qrels=qrels,
+                                names=None if name is None else [name],
+                                **kwargs,
+                            )
+                            df["dataset"] = ds_name
+                            results.append(df)
 
-                    # Dispose of this pipeline (after all member datasets)
-                    try:
-                        del pipeline
-                    finally:
-                        self._free_cuda()
+                        # Dispose of this pipeline (after all member datasets)
+                        try:
+                            del pipeline
+                        finally:
+                            self._free_cuda()
+
+                    # Load and append cached results
+                    for ds_name, ds_id_or_obj in cached_datasets:
+                        if subset and ds_name != subset:
+                            continue
+
+                        ds_member = self._get_dataset_object(ds_id_or_obj)
+                        topics, qrels = self._topics_qrels(ds_member, self._query_field)
+
+                        if not isinstance(ds_name, str):
+                            ds_name = self._get_irds_id(ds_name)
+
+                        for pipeline_name in pipeline_names:
+                            if pipeline_name is None:
+                                continue
+
+                            cached_transformer, metrics_df = self._load_cached_results(
+                                save_dir,
+                                ds_name,
+                                pipeline_name,
+                                topics,
+                                qrels,
+                                eval_metrics or self.get_measures(ds_name),
+                            )
+                            if not metrics_df.empty:
+                                metrics_df["dataset"] = ds_name
+                                results.append(metrics_df)
+
+                else:
+                    # Standard flow (skip_existing=False or no save_dir)
+                    for pipeline, name in self.coerce_pipelines_sequential(
+                        context, ranking_generators
+                    ):
+                        kwargs = experiment_kwargs.copy()
+                        for ds_name, ds_id_or_obj in members:
+                            if subset and ds_name != subset:
+                                continue
+
+                            ds_member = self._get_dataset_object(ds_id_or_obj)
+                            topics, qrels = self._topics_qrels(
+                                ds_member, self._query_field
+                            )
+
+                            if save_dir is not None:
+                                if not isinstance(ds_name, str):
+                                    ds_name = self._get_irds_id(ds_name)
+                                formatted_ds_name = ds_name.replace("/", "-").lower()
+                                ds_save_dir = f"{save_dir}/{formatted_ds_name}"
+                                kwargs["save_dir"] = ds_save_dir
+                                os.makedirs(ds_save_dir, exist_ok=True)
+
+                            df = pt.Experiment(
+                                [pipeline],
+                                eval_metrics=eval_metrics or self.get_measures(ds_name),
+                                topics=topics,
+                                qrels=qrels,
+                                names=None if name is None else [name],
+                                **kwargs,
+                            )
+                            df["dataset"] = ds_name
+                            results.append(df)
+
+                        # Dispose of this pipeline (after all member datasets)
+                        try:
+                            del pipeline
+                        finally:
+                            self._free_cuda()
 
             # Release per-corpus context
             del context

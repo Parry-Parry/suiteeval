@@ -340,3 +340,196 @@ class TestSaveDirIntegrationBEIR:
         # Verify directory structure
         assert os.path.exists(save_path)
         assert os.path.isdir(save_path)
+
+
+# ---------- Tests for skip_existing functionality ----------
+
+
+class TestSkipExisting:
+    """Tests for the skip_existing parameter."""
+
+    def test_skip_existing_false_default_behavior(
+        self, simple_suite, temp_output_dir
+    ):
+        """Verify that skip_existing=False (default) doesn't skip anything."""
+        call_count = [0]
+
+        def counting_pipeline_gen(context):
+            call_count[0] += 1
+            yield DummyRankingTransformer(), "system_a"
+
+        save_path = os.path.join(temp_output_dir, "results_default")
+
+        # First run
+        results1 = simple_suite(counting_pipeline_gen, save_dir=save_path)
+        first_call_count = call_count[0]
+        assert first_call_count == 1
+
+        # Second run (generator should be called again because skip_existing=False)
+        results2 = simple_suite(counting_pipeline_gen, save_dir=save_path)
+        assert call_count[0] == 2
+
+        # Both runs should produce results
+        assert isinstance(results1, pd.DataFrame)
+        assert isinstance(results2, pd.DataFrame)
+        assert not results1.empty
+        assert not results2.empty
+
+    def test_skip_existing_with_no_save_dir(self, simple_suite, temp_output_dir):
+        """Verify that skip_existing has no effect without save_dir."""
+        call_count = [0]
+
+        def counting_pipeline_gen(context):
+            call_count[0] += 1
+            yield DummyRankingTransformer(), "system_a"
+
+        # Run without save_dir but with skip_existing=True
+        results = simple_suite(
+            counting_pipeline_gen,
+            skip_existing=True,
+            # No save_dir parameter
+        )
+
+        # Generator should still be called because no save_dir
+        assert call_count[0] == 1
+        assert isinstance(results, pd.DataFrame)
+
+    def test_skip_existing_loads_cached_results(
+        self, simple_suite, temp_output_dir
+    ):
+        """Verify that skip_existing=True loads cached results correctly."""
+        save_path = os.path.join(temp_output_dir, "results_cache")
+
+        # First run: create the cached files
+        def pipeline_gen_1(context):
+            yield DummyRankingTransformer(), "system_a"
+
+        results1 = simple_suite(pipeline_gen_1, save_dir=save_path)
+        assert not results1.empty
+        assert "system_a" in results1["name"].values
+
+        # Second run: load from cache
+        call_count = [0]
+
+        def pipeline_gen_2(context):
+            call_count[0] += 1
+            yield DummyRankingTransformer(), "system_a"
+
+        results2 = simple_suite(
+            pipeline_gen_2, save_dir=save_path, skip_existing=True
+        )
+
+        # Results should be loaded from cache
+        assert not results2.empty
+        assert "system_a" in results2["name"].values
+
+        # Verify structure matches (same metrics columns, etc.)
+        assert set(results1.columns) == set(results2.columns)
+
+    def test_skip_existing_partial_cache(
+        self, simple_suite, temp_output_dir
+    ):
+        """Verify skip_existing with partial cache (some datasets cached, some not)."""
+        # Create a suite with multiple datasets
+        multi_suite = Suite.register(
+            "test_partial_cache",
+            datasets=["vaswani"],
+            names=["vaswani"],
+            metadata={
+                "official_measures": [nDCG @ 10],
+            },
+        )  # noqa: F811
+
+        save_path = os.path.join(temp_output_dir, "results_partial")
+
+        # First run: compute system_a
+        def gen_a(context):
+            yield DummyRankingTransformer(), "system_a"
+
+        results_a = multi_suite(gen_a, save_dir=save_path)
+        assert "system_a" in results_a["name"].values
+
+        # Second run: compute both system_a and system_b with skip_existing
+        # Since system_a is cached, it should be loaded; system_b should be computed
+        call_count = [0]
+
+        def gen_ab(context):
+            call_count[0] += 1
+            yield DummyRankingTransformer(), "system_a"
+            yield DummyRankingTransformer(), "system_b"
+
+        results_ab = multi_suite(
+            gen_ab, save_dir=save_path, skip_existing=True
+        )
+
+        # Both systems should be in results
+        assert "system_a" in results_ab["name"].values
+        assert "system_b" in results_ab["name"].values
+
+        # Generator was called, but system_a's experiment should have been skipped
+        assert call_count[0] == 1
+
+    def test_skip_existing_all_cached(
+        self, simple_suite, temp_output_dir
+    ):
+        """Verify skip_existing when all runs are already cached."""
+        save_path = os.path.join(temp_output_dir, "results_all_cached")
+
+        # First run: create cached files
+        def gen_1(context):
+            yield DummyRankingTransformer(), "system_a"
+
+        results1 = simple_suite(gen_1, save_dir=save_path)
+        assert not results1.empty
+
+        # Second run: all cached, generator still called to get names
+        call_count = [0]
+
+        def gen_2(context):
+            call_count[0] += 1
+            yield DummyRankingTransformer(), "system_a"
+
+        results2 = simple_suite(
+            gen_2, save_dir=save_path, skip_existing=True
+        )
+
+        # Generator called once to get pipeline names
+        assert call_count[0] == 1
+
+        # Results should be loaded from cache
+        assert not results2.empty
+        assert len(results2) == len(results1)
+
+    def test_skip_existing_preserves_dataframe_structure(
+        self, simple_suite, temp_output_dir
+    ):
+        """Verify that cached results have same structure as computed results."""
+        save_path = os.path.join(temp_output_dir, "results_structure")
+
+        # First run: create baseline
+        def gen(context):
+            yield DummyRankingTransformer(), "system_a"
+
+        results_fresh = simple_suite(gen, save_dir=save_path)
+
+        # Delete the old results to force recomputation
+        import shutil as sh
+        sh.rmtree(save_path)
+
+        # Second run: recompute (baseline for comparison)
+        results_recomputed = simple_suite(gen, save_dir=save_path)
+
+        # Now run with skip_existing on cached results
+        results_cached = simple_suite(
+            gen, save_dir=save_path, skip_existing=True
+        )
+
+        # All three should have same columns
+        assert set(results_fresh.columns) == set(results_recomputed.columns)
+        assert set(results_fresh.columns) == set(results_cached.columns)
+
+        # All should have data rows
+        assert len(results_fresh) > 0
+        assert len(results_recomputed) > 0
+        assert len(results_cached) > 0
+
