@@ -28,7 +28,7 @@ pip install suiteeval
 ```
 ### Install from source
 ```bash
-git clone https://github.com/<your-username>/suiteeval.git
+git clone https://github.com/Parry-Parry/suiteeval.git
 cd suiteeval
 pip install -e .
 ```
