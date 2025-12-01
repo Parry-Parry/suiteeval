@@ -1,6 +1,6 @@
 """Top-level package for SuiteEval."""
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 from suiteeval.suite import (
     Suite,
