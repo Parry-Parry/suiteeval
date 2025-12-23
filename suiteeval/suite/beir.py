@@ -130,6 +130,7 @@ class _BEIR(Suite):
         save_mode: str = "warn",
         save_format: str = "trec",
         precompute_prefix: bool = False,
+        indexing_dir: Optional[str] = None,
     ) -> pd.DataFrame:
         results = super().__call__(
             pipelines,
@@ -150,6 +151,7 @@ class _BEIR(Suite):
             save_mode=save_mode,
             save_format=save_format,
             precompute_prefix=precompute_prefix,
+            indexing_dir=indexing_dir,
         )
 
         if results is None or results.empty:

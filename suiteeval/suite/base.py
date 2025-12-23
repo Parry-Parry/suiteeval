@@ -704,7 +704,8 @@ class Suite(ABC, metaclass=SuiteMeta):
             subset: Optional dataset display name to restrict evaluation to a single member.
             **experiment_kwargs: Additional keyword arguments forwarded to
                 :func:`pyterrier.Experiment`. If ``save_dir`` is provided, it is
-                suffixed per dataset.
+                suffixed per dataset. If ``indexing_dir`` is provided, it is
+                suffixed per corpus for index storage.
 
         Returns:
             pandas.DataFrame: The concatenated experiment results. When ``perquery`` is
@@ -730,7 +731,14 @@ class Suite(ABC, metaclass=SuiteMeta):
                 continue
 
             # Single shared context per corpus (indexing happens once here)
-            context = DatasetContext(corpus_ds)
+            indexing_dir = experiment_kwargs.get("indexing_dir", None)
+            if indexing_dir is not None:
+                formatted_corpus_id = corpus_id.replace("/", "-").lower()
+                corpus_indexing_dir = f"{indexing_dir}/{formatted_corpus_id}"
+                os.makedirs(corpus_indexing_dir, exist_ok=True)
+                context = DatasetContext(corpus_ds, path=corpus_indexing_dir)
+            else:
+                context = DatasetContext(corpus_ds)
 
             if coerce_grouped:
                 # Materialise all pipelines ONCE for the corpus
