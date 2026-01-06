@@ -4,6 +4,7 @@ from typing import Union, Tuple
 
 import click
 import pyterrier as pt
+
 if not pt.started():
     pt.init()
 
@@ -37,7 +38,7 @@ def _dir_size_bytes(path: Union[str, os.PathLike]) -> int:
 
 
 def _mb(x_bytes: int) -> float:
-    return x_bytes / (1024.0 ** 2)
+    return x_bytes / (1024.0**2)
 
 
 def _parse_grid(grid_str: str) -> Tuple[float, ...]:
@@ -54,12 +55,24 @@ def _parse_grid(grid_str: str) -> Tuple[float, ...]:
 
 
 @click.command()
-@click.option("--save-path", type=str, default="results.bm25.csv.gz",
-              help="Path to save the CSV results.")
-@click.option("--k1-grid", type=str, default="0.1,0.3,0.5,1.0,1.2,1.5,2.0",
-              help="Comma-separated k1 values to sweep, e.g. '0.7,0.9,1.2'.")
-@click.option("--b-grid", type=str, default="0.3,0.5,0.75,0.9",
-              help="Comma-separated b values to sweep, e.g. '0.3,0.5,0.75'.")
+@click.option(
+    "--save-path",
+    type=str,
+    default="results.bm25.csv.gz",
+    help="Path to save the CSV results.",
+)
+@click.option(
+    "--k1-grid",
+    type=str,
+    default="0.1,0.3,0.5,1.0,1.2,1.5,2.0",
+    help="Comma-separated k1 values to sweep, e.g. '0.7,0.9,1.2'.",
+)
+@click.option(
+    "--b-grid",
+    type=str,
+    default="0.3,0.5,0.75,0.9",
+    help="Comma-separated b values to sweep, e.g. '0.3,0.5,0.75'.",
+)
 def main(
     save_path: str,
     k1_grid: str,
@@ -97,17 +110,25 @@ def main(
     preferred = ("system", "pipeline", "name", "model")
     # First try to find any column with our token
     for col in result.columns:
-        if result[col].dtype == object and result[col].astype(str).str.contains(r"\|size=\d+\|").any():
+        if (
+            result[col].dtype == object
+            and result[col].astype(str).str.contains(r"\|size=\d+\|").any()
+        ):
             label_col = col
             break
     # Heuristic fallback
     if label_col is None:
         for col in preferred:
-            if col in result.columns and result[col].astype(str).str.contains(r"\|size=\d+\|").any():
+            if (
+                col in result.columns
+                and result[col].astype(str).str.contains(r"\|size=\d+\|").any()
+            ):
                 label_col = col
                 break
     if label_col is None:
-        raise RuntimeError("Could not locate the pipeline label column containing the '|size=...|' token.")
+        raise RuntimeError(
+            "Could not locate the pipeline label column containing the '|size=...|' token."
+        )
 
     # --- Parse tokens from the label into numeric columns ---
     # Size in bytes (int)
@@ -117,7 +138,7 @@ def main(
         .str.extract(r"\|size=(\d+)\|", expand=False)
         .astype("int64")
     )
-    result["disk_size_mb"] = result["disk_size_bytes"] / (1024.0 ** 2)
+    result["disk_size_mb"] = result["disk_size_bytes"] / (1024.0**2)
 
     # k1 and b (floats)
     # Accept integers or decimal floats

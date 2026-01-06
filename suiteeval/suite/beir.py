@@ -130,6 +130,7 @@ class _BEIR(Suite):
         save_mode: str = "warn",
         save_format: str = "trec",
         precompute_prefix: bool = False,
+        index_dir: Optional[str] = None,
     ) -> pd.DataFrame:
         results = super().__call__(
             pipelines,
@@ -150,6 +151,7 @@ class _BEIR(Suite):
             save_mode=save_mode,
             save_format=save_format,
             precompute_prefix=precompute_prefix,
+            index_dir=index_dir,
         )
 
         if results is None or results.empty:
@@ -166,14 +168,14 @@ class _BEIR(Suite):
             grouping.append("qid")
 
         # Determine which metric columns to aggregate (exclude non-metric columns)
-        metric_cols = [col for col in cqadupstack.columns if col not in grouping + ["dataset", "name", "qid"]]
+        metric_cols = [
+            col
+            for col in cqadupstack.columns
+            if col not in grouping + ["dataset", "name", "qid"]
+        ]
         agg_dict = {col: geometric_mean for col in metric_cols}
 
-        cqadupstack = (
-            cqadupstack.groupby(grouping)
-            .agg(agg_dict)
-            .reset_index()
-        )
+        cqadupstack = cqadupstack.groupby(grouping).agg(agg_dict).reset_index()
         cqadupstack["dataset"] = "beir/cqadupstack"
         results = pd.concat([not_cqadupstack, cqadupstack], ignore_index=True)
 

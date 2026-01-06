@@ -64,6 +64,7 @@ class _NanoBEIR(_BEIR):
         save_mode: str = "warn",
         save_format: str = "trec",
         precompute_prefix: bool = False,
+        index_dir: Optional[str] = None,
     ) -> pd.DataFrame:
         results = super().__call__(
             pipelines,
@@ -84,6 +85,7 @@ class _NanoBEIR(_BEIR):
             save_mode=save_mode,
             save_format=save_format,
             precompute_prefix=precompute_prefix,
+            index_dir=index_dir,
         )
 
         if results is None or results.empty:
