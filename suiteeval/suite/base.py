@@ -240,7 +240,9 @@ class Suite(ABC, metaclass=SuiteMeta):
 
             if corpus_id not in groups:
                 # Load the corpus dataset (handles both string IDs and objects)
-                corpus_ds = self._get_dataset_object(corpus_id if isinstance(corpus_id, str) else irds_id)
+                corpus_ds = self._get_dataset_object(
+                    corpus_id if isinstance(corpus_id, str) else irds_id
+                )
                 groups[corpus_id] = {
                     "corpus_ds": corpus_ds,
                     "members": [],
@@ -704,7 +706,7 @@ class Suite(ABC, metaclass=SuiteMeta):
             subset: Optional dataset display name to restrict evaluation to a single member.
             **experiment_kwargs: Additional keyword arguments forwarded to
                 :func:`pyterrier.Experiment`. If ``save_dir`` is provided, it is
-                suffixed per dataset. If ``indexing_dir`` is provided, it is
+                suffixed per dataset. If ``index_dir`` is provided, it is
                 suffixed per corpus for index storage.
 
         Returns:
@@ -725,18 +727,20 @@ class Suite(ABC, metaclass=SuiteMeta):
                 "Significance tests require pipelines to be grouped; this uses more memory."
             )
 
+        # Extract index_dir before the corpus loop (pop so it doesn't go to pt.Experiment)
+        index_dir = experiment_kwargs.pop("index_dir", None)
+
         for corpus_id, corpus_ds, members in self._iter_corpus_groups():
             # If a subset was requested, skip this corpus unless it contains the subset
             if subset and all(name != subset for name, _ in members):
                 continue
 
             # Single shared context per corpus (indexing happens once here)
-            indexing_dir = experiment_kwargs.get("indexing_dir", None)
-            if indexing_dir is not None:
+            if index_dir is not None:
                 formatted_corpus_id = corpus_id.replace("/", "-").lower()
-                corpus_indexing_dir = f"{indexing_dir}/{formatted_corpus_id}"
-                os.makedirs(corpus_indexing_dir, exist_ok=True)
-                context = DatasetContext(corpus_ds, path=corpus_indexing_dir)
+                corpus_index_dir = f"{index_dir}/{formatted_corpus_id}"
+                os.makedirs(corpus_index_dir, exist_ok=True)
+                context = DatasetContext(corpus_ds, path=corpus_index_dir)
             else:
                 context = DatasetContext(corpus_ds)
 

@@ -1,4 +1,5 @@
 """Tests for save_dir functionality to verify file structure and run files."""
+
 import os
 import tempfile
 import shutil
@@ -15,6 +16,7 @@ from suiteeval.suite.beir import BEIR
 
 # ---------- Test Fixtures ----------
 
+
 class DummyRankingTransformer(Transformer):
     """A simple transformer that generates dummy rankings."""
 
@@ -22,19 +24,23 @@ class DummyRankingTransformer(Transformer):
         """Generate a dummy ranking for each topic."""
         rows = []
         for _, row in topics_df.iterrows():
-            qid = row['qid']
-            rows.append({
-                'qid': qid,
-                'docno': 'doc_1',
-                'rank': 0,
-                'score': 0.9,
-            })
-            rows.append({
-                'qid': qid,
-                'docno': 'doc_2',
-                'rank': 1,
-                'score': 0.5,
-            })
+            qid = row["qid"]
+            rows.append(
+                {
+                    "qid": qid,
+                    "docno": "doc_1",
+                    "rank": 0,
+                    "score": 0.9,
+                }
+            )
+            rows.append(
+                {
+                    "qid": qid,
+                    "docno": "doc_2",
+                    "rank": 1,
+                    "score": 0.5,
+                }
+            )
         return pd.DataFrame(rows)
 
 
@@ -63,13 +69,13 @@ def simple_suite():
 
 # ---------- Tests ----------
 
+
 class TestSaveDirBasicStructure:
     """Tests for basic save_dir file structure creation."""
 
-    def test_save_dir_creates_directory_structure(
-        self, simple_suite, temp_output_dir
-    ):
+    def test_save_dir_creates_directory_structure(self, simple_suite, temp_output_dir):
         """Verify that save_dir creates the expected directory structure."""
+
         def dummy_pipeline_gen(context):
             yield DummyRankingTransformer(), "dummy_system"
 
@@ -84,6 +90,7 @@ class TestSaveDirBasicStructure:
         self, simple_suite, temp_output_dir
     ):
         """Verify that subdirectories are created for each dataset."""
+
         def dummy_pipeline_gen(context):
             yield DummyRankingTransformer(), "dummy_system"
 
@@ -120,10 +127,9 @@ class TestSaveDirBasicStructure:
 class TestSaveDirRunFiles:
     """Tests for the creation of run files in save_dir."""
 
-    def test_save_dir_creates_run_files(
-        self, simple_suite, temp_output_dir
-    ):
+    def test_save_dir_creates_run_files(self, simple_suite, temp_output_dir):
         """Verify that run files are created in the save_dir."""
+
         def dummy_pipeline_gen(context):
             yield DummyRankingTransformer(), "dummy_system"
 
@@ -133,26 +139,19 @@ class TestSaveDirRunFiles:
         dataset_dir = os.path.join(save_path, "vaswani")
 
         # List files in the dataset directory
-        files = os.listdir(dataset_dir) if os.path.exists(
-            dataset_dir
-        ) else []
+        files = os.listdir(dataset_dir) if os.path.exists(dataset_dir) else []
 
         # PyTerrier creates TREC format run files by default
         assert len(files) > 0
 
-    def test_save_format_trec_creates_trec_files(
-        self, simple_suite, temp_output_dir
-    ):
+    def test_save_format_trec_creates_trec_files(self, simple_suite, temp_output_dir):
         """Verify that TREC format is used when save_format='trec'."""
+
         def dummy_pipeline_gen(context):
             yield DummyRankingTransformer(), "dummy_system"
 
         save_path = os.path.join(temp_output_dir, "results_trec")
-        simple_suite(
-            dummy_pipeline_gen,
-            save_dir=save_path,
-            save_format="trec"
-        )
+        simple_suite(dummy_pipeline_gen, save_dir=save_path, save_format="trec")
 
         dataset_dir = os.path.join(save_path, "vaswani")
 
@@ -166,20 +165,19 @@ class TestSaveDirRunFiles:
                 filepath = os.path.join(dataset_dir, f)
                 if os.path.isfile(filepath):
                     try:
-                        with gzip.open(filepath, 'rt') as file:
+                        with gzip.open(filepath, "rt") as file:
                             first_line = file.readline()
                     except (OSError, gzip.BadGzipFile):
-                        with open(filepath, 'r') as file:
+                        with open(filepath, "r") as file:
                             first_line = file.readline()
                     # TREC format: qid iter docno rank score name
                     parts = first_line.strip().split()
                     assert len(parts) >= 6
                     break
 
-    def test_save_dir_run_file_content(
-        self, simple_suite, temp_output_dir
-    ):
+    def test_save_dir_run_file_content(self, simple_suite, temp_output_dir):
         """Verify that run files contain valid ranking data."""
+
         def dummy_pipeline_gen(context):
             yield DummyRankingTransformer(), "test_system"
 
@@ -194,10 +192,10 @@ class TestSaveDirRunFiles:
                 filepath = os.path.join(dataset_dir, filename)
                 if os.path.isfile(filepath):
                     try:
-                        with gzip.open(filepath, 'rt') as f:
+                        with gzip.open(filepath, "rt") as f:
                             lines = f.readlines()
                     except (OSError, gzip.BadGzipFile):
-                        with open(filepath, 'r') as f:
+                        with open(filepath, "r") as f:
                             lines = f.readlines()
 
                     assert len(lines) > 0
@@ -212,9 +210,7 @@ class TestSaveDirRunFiles:
 class TestSaveDirWithMultipleSystems:
     """Tests for save_dir with multiple ranking systems."""
 
-    def test_save_dir_with_multiple_systems(
-        self, simple_suite, temp_output_dir
-    ):
+    def test_save_dir_with_multiple_systems(self, simple_suite, temp_output_dir):
         """Verify that run files are created for each system."""
         systems = ["system_a", "system_b", "system_c"]
 
@@ -236,9 +232,7 @@ class TestSaveDirWithMultipleSystems:
 class TestSaveDirEdgeCases:
     """Tests for edge cases and error handling."""
 
-    def test_save_dir_with_special_characters_in_name(
-        self, temp_output_dir
-    ):
+    def test_save_dir_with_special_characters_in_name(self, temp_output_dir):
         """Verify handling of dataset names with special characters."""
         # Some BEIR datasets have names with slashes
         suite_with_slashes = Suite.register(
@@ -261,9 +255,7 @@ class TestSaveDirEdgeCases:
 
     def test_save_dir_nested_path_creation(self, temp_output_dir):
         """Verify that nested paths are created correctly."""
-        nested_path = os.path.join(
-            temp_output_dir, "a", "b", "c", "results"
-        )
+        nested_path = os.path.join(temp_output_dir, "a", "b", "c", "results")
 
         def dummy_pipeline_gen(context):
             yield DummyRankingTransformer(), "system"
@@ -287,6 +279,7 @@ class TestSaveDirWithBEIR:
 
     def test_beir_save_dir_creates_dataset_subdirs(self, temp_output_dir):
         """Verify that BEIR creates subdirectories for each dataset."""
+
         # Create a mock pipeline that yields dummy rankings
         def dummy_pipeline_gen(context):
             yield DummyRankingTransformer(), "test_system"
@@ -313,25 +306,21 @@ class TestSaveDirWithBEIR:
 
 # ---------- Integration Tests ----------
 
-@pytest.mark.skip(
-    reason="Requires real BEIR datasets - run manually with full setup"
-)
+
+@pytest.mark.skip(reason="Requires real BEIR datasets - run manually with full setup")
 class TestSaveDirIntegrationBEIR:
     """Integration tests with actual BEIR datasets."""
 
     def test_beir_full_pipeline_with_save_dir(self, temp_output_dir):
         """Full integration test with BEIR suite."""
+
         def dummy_pipeline_gen(context):
             yield DummyRankingTransformer(), "test_system"
 
         save_path = os.path.join(temp_output_dir, "beir_full")
 
         # Test with subset for speed
-        results = BEIR(
-            dummy_pipeline_gen,
-            save_dir=save_path,
-            subset="beir/arguana"
-        )
+        results = BEIR(dummy_pipeline_gen, save_dir=save_path, subset="beir/arguana")
 
         # Verify results dataframe
         assert isinstance(results, pd.DataFrame)

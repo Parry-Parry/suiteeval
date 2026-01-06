@@ -5,6 +5,7 @@ from typing import Optional, Union
 import click
 import pandas as pd
 import pyterrier as pt
+
 if not pt.started():
     pt.init()
 import pyterrier_alpha as pta
@@ -41,7 +42,7 @@ def _dir_size_bytes(path: Union[str, os.PathLike]) -> int:
 
 
 def _mb(x_bytes: int) -> float:
-    return x_bytes / (1024.0 ** 2)
+    return x_bytes / (1024.0**2)
 
 
 def rr_linear_fusion(
@@ -49,7 +50,7 @@ def rr_linear_fusion(
     r2: pd.DataFrame,
     k: int = 60,
     alpha: float = 0.5,
-    num_results: Optional[int] = 1000
+    num_results: Optional[int] = 1000,
 ) -> pd.DataFrame:
     """
     Reciprocal-Rank Linear Interpolation between exactly two ranking result frames.
@@ -66,42 +67,44 @@ def rr_linear_fusion(
     assert 0.0 <= alpha <= 1.0, "alpha must be in [0, 1]"
 
     # Validate and ensure ranks exist
-    pta.validate.result_frame(r1, extra_columns=['score'])
-    pta.validate.result_frame(r2, extra_columns=['score'])
+    pta.validate.result_frame(r1, extra_columns=["score"])
+    pta.validate.result_frame(r2, extra_columns=["score"])
     pt.model.add_ranks(r1)
     pt.model.add_ranks(r2)
 
     # Keep optional 'query' if provided; otherwise synthesize a neutral column for merge
-    has_query = 'query' in r1.columns and 'query' in r2.columns
-    merge_keys = ['qid', 'docno'] + (['query'] if has_query else [])
+    has_query = "query" in r1.columns and "query" in r2.columns
+    merge_keys = ["qid", "docno"] + (["query"] if has_query else [])
 
     # Convert to RRF scores
-    s1 = r1[merge_keys + ['rank']].copy()
-    s1['rrf1'] = 1.0 / (s1['rank'] + k)
-    s1 = s1.drop(columns=['rank'])
+    s1 = r1[merge_keys + ["rank"]].copy()
+    s1["rrf1"] = 1.0 / (s1["rank"] + k)
+    s1 = s1.drop(columns=["rank"])
 
-    s2 = r2[merge_keys + ['rank']].copy()
-    s2['rrf2'] = 1.0 / (s2['rank'] + k)
-    s2 = s2.drop(columns=['rank'])
+    s2 = r2[merge_keys + ["rank"]].copy()
+    s2["rrf2"] = 1.0 / (s2["rank"] + k)
+    s2 = s2.drop(columns=["rank"])
 
     # Outer merge and interpolate
-    merged = s1.merge(s2, how='outer', on=merge_keys)
-    merged['rrf1'] = merged['rrf1'].fillna(0.0)
-    merged['rrf2'] = merged['rrf2'].fillna(0.0)
-    merged = merged.assign(score=alpha * merged['rrf1'] + (1.0 - alpha) * merged['rrf2'])
-    merged = merged.drop(columns=['rrf1', 'rrf2'])
+    merged = s1.merge(s2, how="outer", on=merge_keys)
+    merged["rrf1"] = merged["rrf1"].fillna(0.0)
+    merged["rrf2"] = merged["rrf2"].fillna(0.0)
+    merged = merged.assign(
+        score=alpha * merged["rrf1"] + (1.0 - alpha) * merged["rrf2"]
+    )
+    merged = merged.drop(columns=["rrf1", "rrf2"])
 
     # Rank within query and apply cutoff if requested
     pt.model.add_ranks(merged)
-    merged = merged.sort_values(['qid', 'rank'], ascending=[True, True])
+    merged = merged.sort_values(["qid", "rank"], ascending=[True, True])
 
     if num_results is not None:
-        merged = merged[merged['rank'] < num_results]
+        merged = merged[merged["rank"] < num_results]
 
     # Reorder columns to match PyTerrier expectations
-    cols = ['qid', 'docno', 'score', 'rank']
+    cols = ["qid", "docno", "score", "rank"]
     if has_query:
-        cols = ['qid', 'query', 'docno', 'score', 'rank']
+        cols = ["qid", "query", "docno", "score", "rank"]
     return merged[cols].reset_index(drop=True)
 
 
@@ -118,16 +121,19 @@ class RRLinearFusion(pt.Transformer):
       alpha: interpolation weight in [0, 1]; weight for the first transformer.
       num_results: number of results to keep per query; if None, keep all.
     """
-    schematic = {'inner_pipelines_mode': 'combine'}
+
+    schematic = {"inner_pipelines_mode": "combine"}
 
     def __init__(
         self,
         *transformers: pt.Transformer,
         k: int = 60,
         alpha: float = 0.5,
-        num_results: Optional[int] = 1000
+        num_results: Optional[int] = 1000,
     ):
-        assert len(transformers) == 2, "RRLinearFusion requires exactly two transformers"
+        assert len(transformers) == 2, (
+            "RRLinearFusion requires exactly two transformers"
+        )
         assert 0.0 <= alpha <= 1.0, "alpha must be in [0, 1]"
         self.transformers = transformers
         self.k = k
@@ -137,19 +143,35 @@ class RRLinearFusion(pt.Transformer):
     def transform(self, inp: pd.DataFrame) -> pd.DataFrame:
         r1 = self.transformers[0](inp)
         r2 = self.transformers[1](inp)
-        return rr_linear_fusion(r1, r2, k=self.k, alpha=self.alpha, num_results=self.num_results)
+        return rr_linear_fusion(
+            r1, r2, k=self.k, alpha=self.alpha, num_results=self.num_results
+        )
 
 
 @click.command()
-@click.option("--save-path", type=str, default='results.csv.gz', help="Path to save the CSV results.")
-@click.option("--checkpoint", type=str, default="Shitao/RetroMAE_MSMARCO_finetune", help="Checkpoint for biencoder.")
-@click.option("--score-cache-dir", type=str, default="score_cache",
-              help="Directory where scorer caches are stored (one subdir per dataset/checkpoint).")
+@click.option(
+    "--save-path",
+    type=str,
+    default="results.csv.gz",
+    help="Path to save the CSV results.",
+)
+@click.option(
+    "--checkpoint",
+    type=str,
+    default="Shitao/RetroMAE_MSMARCO_finetune",
+    help="Checkpoint for biencoder.",
+)
+@click.option(
+    "--score-cache-dir",
+    type=str,
+    default="score_cache",
+    help="Directory where scorer caches are stored (one subdir per dataset/checkpoint).",
+)
 def main(
-        save_path: str,
-        checkpoint: str,
-        score_cache_dir: str,
-        ):
+    save_path: str,
+    checkpoint: str,
+    score_cache_dir: str,
+):
     def pipelines(context: DatasetContext):
         # --- cache roots and tags ---
         dataset_tag = Path(context.path).name
@@ -184,7 +206,7 @@ def main(
 
         yield (
             e2e_pipe,
-            f"Bi-Encoder end-to-end |size={biencoder_size_b}| ({biencoder_size_mb:.1f} MB)"
+            f"Bi-Encoder end-to-end |size={biencoder_size_b}| ({biencoder_size_mb:.1f} MB)",
         )
 
         # --- PISA (BM25) indexing ---
@@ -209,14 +231,14 @@ def main(
             yield (
                 RRLinearFusion(e2e_pipe, biencoder_pipe, alpha=i),
                 f"RRLinearFusion(Bi-Encoder E2E, BM25 >> Bi-Encoder, alpha={i:.1f}) "
-                f"|size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)"
+                f"|size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)",
             )
 
         for i in alphas:
             yield (
                 RRLinearFusion(bm25, biencoder_pipe, alpha=i),
                 f"RRLinearFusion(BM25, BM25 >> Bi-Encoder, alpha={i:.1f}) "
-                f"|size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)"
+                f"|size={pisa_size_b + biencoder_size_b}| ({(pisa_size_mb + biencoder_size_mb):.1f} MB)",
             )
 
     result = NanoBEIR(pipelines)
@@ -224,20 +246,28 @@ def main(
     # Identify the label column that contains our parse marker
     label_col = None
     for col in result.columns:
-        if result[col].dtype == object and result[col].astype(str).str.contains(r"\|size=\d+\|").any():
+        if (
+            result[col].dtype == object
+            and result[col].astype(str).str.contains(r"\|size=\d+\|").any()
+        ):
             label_col = col
             break
 
     if label_col is None:
         # Fallback: common label column names you might be using
         for candidate in ("system", "pipeline", "name", "model"):
-            if candidate in result.columns and result[candidate].astype(str).str.contains(r"\|size=\d+\|").any():
+            if (
+                candidate in result.columns
+                and result[candidate].astype(str).str.contains(r"\|size=\d+\|").any()
+            ):
                 label_col = candidate
                 break
 
     if label_col is None:
         # If still not found, raise an informative error to catch schema changes early
-        raise RuntimeError("Could not locate the pipeline label column containing the '|size=...|' token.")
+        raise RuntimeError(
+            "Could not locate the pipeline label column containing the '|size=...|' token."
+        )
 
     # Extract bytes as integer
     result["disk_size_bytes"] = (
@@ -247,9 +277,13 @@ def main(
         .astype("int64")
     )
 
-    result["disk_size_mb"] = result["disk_size_bytes"] / (1024.0 ** 2)
+    result["disk_size_mb"] = result["disk_size_bytes"] / (1024.0**2)
 
-    result[label_col] = result[label_col].str.replace(r"\s*\|size=\d+\|\s*", " ", regex=True).str.strip()
+    result[label_col] = (
+        result[label_col]
+        .str.replace(r"\s*\|size=\d+\|\s*", " ", regex=True)
+        .str.strip()
+    )
 
     result.to_csv(save_path)
 
