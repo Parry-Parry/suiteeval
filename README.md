@@ -73,9 +73,28 @@ results = BEIR(pipelines)  # per-dataset metrics and system names (if provided)
 
 ## 📦 Reproducibility & Resource Management
 
-- **Temporary indices** live under `context.path` and are cleaned up.  
-- Prefer **yielding** pipelines when using large models.  
+- **Temporary indices** live under `context.path` and are cleaned up.
+- Prefer **yielding** pipelines when using large models.
 - Name systems via `(pipeline, "<name>")` for clear result tables and logs.
+
+### Persistent Index Storage
+
+By default, indices are stored in temporary directories. To persist indices across runs, use the `index_dir` parameter:
+
+```python
+# Indices will be stored in ./indices/<corpus-name>/
+# Run files will be stored in ./results/<dataset-name>/
+results = BEIR(
+    pipelines,
+    save_dir="./results",   # Where to save run files (per-dataset)
+    index_dir="./indices"   # Where to store indices (per-corpus)
+)
+```
+
+Key differences:
+- `save_dir` creates **per-dataset** subdirectories (e.g., `./results/beir-arguana/`)
+- `index_dir` creates **per-corpus** subdirectories (e.g., `./indices/beir-arguana/`)
+- Multiple datasets sharing a corpus will reuse the same index directory
 
 ## 🛠️ Compatibility
 
