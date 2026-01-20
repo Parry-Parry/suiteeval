@@ -19,7 +19,7 @@ from pyterrier import Transformer
 from suiteeval.context import DatasetContext
 from suiteeval.utility import geometric_mean
 
-logging = getLogger(__name__)
+logger = getLogger(__name__)
 
 
 class SuiteMeta(ABCMeta):
@@ -140,9 +140,6 @@ class Suite(ABC, metaclass=SuiteMeta):
     __default_measures: list[Measure] = [nDCG @ 10]
     _query_field: Optional[str] = None
 
-    # ---------------------------
-    # Construction and validation
-    # ---------------------------
     def __init__(self):
         self.coerce_measures(self._metadata)
         if "description" in self._metadata:
@@ -158,30 +155,40 @@ class Suite(ABC, metaclass=SuiteMeta):
             raise AssertionError(
                 "Suite _datasets must be a dict[name->id] or a list[dataset_id]"
             )
-        """
-        TODO: Allow validation of non-string datasets
+
+        def _is_valid_dataset(ds: Any) -> bool:
+            """Check if ds is a string ID or a valid dataset object."""
+            if isinstance(ds, str):
+                return True
+            return (
+                hasattr(ds, "_irds_id")
+                and hasattr(ds, "get_topics")
+                and hasattr(ds, "get_qrels")
+            )
+
         if isinstance(self._datasets, dict):
-            if not all(
-                isinstance(k, str) and isinstance(v, str)
-                for k, v in self._datasets.items()
-            ):
-                raise AssertionError(
-                    "Suite _datasets must map string names to string dataset IDs"
-                )
+            for name, ds in self._datasets.items():
+                if not isinstance(name, str):
+                    raise AssertionError(
+                        f"Suite _datasets keys must be strings, got {type(name)}"
+                    )
+                if not _is_valid_dataset(ds):
+                    raise AssertionError(
+                        f"Suite _datasets[{name!r}] must be a string ID or a dataset "
+                        "object with _irds_id, get_topics, and get_qrels"
+                    )
         else:
-            if not all(isinstance(ds, str) for ds in self._datasets):
-                raise AssertionError(
-                    "Suite _datasets list must contain dataset IDs (str)"
-                )
-        """
+            for i, ds in enumerate(self._datasets):
+                if not _is_valid_dataset(ds):
+                    raise AssertionError(
+                        f"Suite _datasets[{i}] must be a string ID or a dataset "
+                        "object with _irds_id, get_topics, and get_qrels"
+                    )
 
         assert self._measures is not None, (
             "Suite must have measures defined in _measures"
         )
 
-    # ---------------------------
-    # Corpus grouping
-    # ---------------------------
     @staticmethod
     def _get_irds_id(ds_id_or_obj: Any) -> str:
         """
@@ -254,9 +261,6 @@ class Suite(ABC, metaclass=SuiteMeta):
         for corpus_id, g in groups.items():
             yield corpus_id, g["corpus_ds"], g["members"]
 
-    # ---------------------------
-    # Measures
-    # ---------------------------
     @staticmethod
     def parse_measures(measures: list[Union[str, Measure]]) -> list[Measure]:
         """
@@ -361,12 +365,12 @@ class Suite(ABC, metaclass=SuiteMeta):
                 if isinstance(docs, dict):
                     _add_many(docs.get("official_measures"))
             except Exception as e:
-                logging.warning(
+                logger.warning(
                     f"Failed to load measures from documentation for '{name}' ({ds_id}): {e}"
                 )
 
         if not measures_accum:
-            logging.warning("No measures discovered; defaulting to [nDCG@10].")
+            logger.warning("No measures discovered; defaulting to [nDCG@10].")
             measures_accum = [nDCG @ 10]
 
         self._measures = measures_accum
@@ -723,7 +727,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         baseline = experiment_kwargs.get("baseline", None)
         coerce_grouped = baseline is not None
         if coerce_grouped:
-            logging.warning(
+            logger.warning(
                 "Significance tests require pipelines to be grouped; this uses more memory."
             )
 
