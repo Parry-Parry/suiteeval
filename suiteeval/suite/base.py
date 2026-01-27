@@ -601,7 +601,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                     row[col] = geometric_mean(vals)
                 gmean_rows.append(row)
 
-            gmean_df = pd.DataFrame(gmean_rows)
+            gmean_df = pd.DataFrame(gmean_rows).drop_duplicates()
             results = pd.concat([results, gmean_df], ignore_index=True)
 
         return results
