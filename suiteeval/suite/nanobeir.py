@@ -91,9 +91,7 @@ class _NanoBEIR(_BEIR):
         if results is None or results.empty:
             return pd.DataFrame()
 
-        if not perquery:
-            results = self.compute_overall_mean(results)
-
+        # Note: compute_overall_mean is handled by parent _BEIR.__call__
         return results
 
 

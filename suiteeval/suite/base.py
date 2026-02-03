@@ -573,17 +573,25 @@ class Suite(ABC, metaclass=SuiteMeta):
 
         Args:
             results: DataFrame with at least ``["dataset", "name"]`` and metric columns.
-            eval_metrics: Optional sequence of metrics to consider; defaults to
-                ``self.__default_measures`` when not provided.
+            eval_metrics: Optional sequence of metrics to consider. If not provided,
+                auto-detects all numeric metric columns in the results.
 
         Returns:
             pandas.DataFrame: The input results with additional ``Overall`` rows appended.
         """
+        # Idempotency check: skip if Overall rows already exist
+        if "Overall" in results["dataset"].values:
+            return results
+
+        # Auto-detect metric columns by excluding known non-metric columns
+        non_metric_cols = {"dataset", "name", "qid", "docno", "rank", "score", "query"}
         measure_cols = [
-            str(m)
-            for m in (eval_metrics or self.__default_measures)
-            if str(m) in results.columns
+            col
+            for col in results.columns
+            if col not in non_metric_cols
+            and pd.api.types.is_numeric_dtype(results[col])
         ]
+
         if measure_cols:
             per_ds = (
                 results.groupby(["dataset", "name"], dropna=False)[measure_cols]
@@ -601,7 +609,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                     row[col] = geometric_mean(vals)
                 gmean_rows.append(row)
 
-            gmean_df = pd.DataFrame(gmean_rows).drop_duplicates()
+            gmean_df = pd.DataFrame(gmean_rows)
             results = pd.concat([results, gmean_df], ignore_index=True)
 
         return results
@@ -691,6 +699,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         ],
         eval_metrics: Sequence[Any] = None,
         subset: Optional[str] = None,
+        compute_overall: bool = True,
         **experiment_kwargs: dict[str, Any],
     ) -> pd.DataFrame:
         """
@@ -836,7 +845,7 @@ class Suite(ABC, metaclass=SuiteMeta):
 
         # Aggregate geometric mean only across actual Measure columns
         perquery = experiment_kwargs.get("perquery", False)
-        if not perquery and not results_df.empty:
+        if compute_overall and not perquery and not results_df.empty:
             results_df = self.compute_overall_mean(results_df)
 
         return results_df

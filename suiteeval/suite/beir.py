@@ -136,6 +136,7 @@ class _BEIR(Suite):
             pipelines,
             eval_metrics=eval_metrics,
             subset=subset,
+            compute_overall=False,  # BEIR computes overall after CQADupStack aggregation
             perquery=perquery,
             batch_size=batch_size,
             filter_by_qrels=filter_by_qrels,
