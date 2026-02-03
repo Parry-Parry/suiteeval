@@ -109,9 +109,14 @@ For older environments, ensure standard PyTerrier transformer interfaces.
 
 ## 🧾 Version History
 
-| Version | Date       | Changes        |
-|-------:|------------|----------------|
-|    0.1 | 2025-11-03 | Initial README |
+| Version | Date       | Changes                                              |
+|--------:|------------|------------------------------------------------------|
+|   0.1.6 | 2026-02-03 | Fix duplicate Overall rows, auto-detect all metrics  |
+|   0.1.5 | 2026-01-07 | Custom index folder support for persistent indices   |
+|   0.1.4 | 2025-12-01 | Fix save directory handling                          |
+|   0.1.3 | 2025-12-01 | PyTerrier 1.0 compatibility, mixed datasets support  |
+|   0.1.2 | 2025-10-29 | Documentation improvements and bug fixes             |
+|     0.1 | 2025-10-03 | Initial release                                      |
 
 ## License
 
