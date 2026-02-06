@@ -33,7 +33,16 @@ def _load_run_file(filepath: str) -> pd.DataFrame:
             header=None,
             names=["qid", "iter", "docno", "rank", "score", "name"],
         )
-    return df[["qid", "docno", "score", "rank"]]
+    df = df[["qid", "docno", "score", "rank"]]
+    return _ensure_string_ids(df)
+
+
+def _ensure_string_ids(df: pd.DataFrame, cols: Sequence[str] = ("qid", "docno")) -> pd.DataFrame:
+    """Coerce identifier columns to strings for safe joins/merges."""
+    for col in cols:
+        if col in df.columns:
+            df[col] = df[col].astype("string")
+    return df
 
 
 def _get_run_file_path(save_dir: str, ds_name: str, pipeline_name: str) -> str:
@@ -724,6 +733,8 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         topics = ds.get_topics(query_field)
         qrels = ds.get_qrels()
+        topics = _ensure_string_ids(topics, ("qid",))
+        qrels = _ensure_string_ids(qrels, ("qid", "docno"))
         return topics, qrels
 
     @staticmethod
