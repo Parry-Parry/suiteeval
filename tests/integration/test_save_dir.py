@@ -329,3 +329,118 @@ class TestSaveDirIntegrationBEIR:
         # Verify directory structure
         assert os.path.exists(save_path)
         assert os.path.isdir(save_path)
+
+
+class TestSaveDirMultiDatasetIsolation:
+    """Integration tests for save_dir with multiple datasets sharing a corpus."""
+
+    def test_multiple_datasets_create_separate_directories(self, temp_output_dir):
+        """Each dataset in a multi-dataset suite creates its own subdirectory."""
+        multi_suite = Suite.register(
+            "test_multi_dirs",
+            datasets=["vaswani", "vaswani"],
+            names=["test_ds_one", "test_ds_two"],
+            metadata={"official_measures": [nDCG @ 10]},
+        )
+
+        def pipeline_gen(context):
+            yield DummyRankingTransformer(), "system_a"
+
+        save_path = os.path.join(temp_output_dir, "results")
+        multi_suite(pipeline_gen, save_dir=save_path)
+
+        # Both directories should exist
+        dir_one = os.path.join(save_path, "test_ds_one")
+        dir_two = os.path.join(save_path, "test_ds_two")
+
+        assert os.path.exists(dir_one), f"Directory {dir_one} should exist"
+        assert os.path.exists(dir_two), f"Directory {dir_two} should exist"
+
+    def test_each_dataset_dir_contains_all_system_files(self, temp_output_dir):
+        """Each dataset subdirectory should contain TREC files for ALL systems."""
+        systems = ["system_alpha", "system_beta", "system_gamma"]
+
+        multi_suite = Suite.register(
+            "test_all_systems",
+            datasets=["vaswani", "vaswani"],
+            names=["dataset_x", "dataset_y"],
+            metadata={"official_measures": [nDCG @ 10]},
+        )
+
+        def pipeline_gen(context):
+            for name in systems:
+                yield DummyRankingTransformer(), name
+
+        save_path = os.path.join(temp_output_dir, "results")
+        multi_suite(pipeline_gen, save_dir=save_path)
+
+        for ds_name in ["dataset_x", "dataset_y"]:
+            ds_dir = os.path.join(save_path, ds_name)
+            assert os.path.exists(ds_dir), f"Directory for {ds_name} should exist"
+
+            files = os.listdir(ds_dir)
+            # Should have files for all 3 systems
+            assert len(files) >= len(systems), (
+                f"Expected at least {len(systems)} files in {ds_dir}, found {len(files)}"
+            )
+
+    def test_grouped_mode_creates_correct_directory_structure(self, temp_output_dir):
+        """Grouped mode (with baseline) creates correct directories for each dataset."""
+        multi_suite = Suite.register(
+            "test_grouped_dirs",
+            datasets=["vaswani", "vaswani"],
+            names=["grouped_ds_a", "grouped_ds_b"],
+            metadata={"official_measures": [nDCG @ 10]},
+        )
+
+        def pipeline_gen(context):
+            yield DummyRankingTransformer(), "baseline_system"
+            yield DummyRankingTransformer(), "test_system"
+
+        save_path = os.path.join(temp_output_dir, "results_grouped")
+        # baseline=0 triggers grouped mode
+        multi_suite(pipeline_gen, save_dir=save_path, baseline=0)
+
+        # Both dataset directories should exist
+        assert os.path.exists(os.path.join(save_path, "grouped_ds_a"))
+        assert os.path.exists(os.path.join(save_path, "grouped_ds_b"))
+
+        # Each should contain files for both systems
+        for ds_name in ["grouped_ds_a", "grouped_ds_b"]:
+            ds_dir = os.path.join(save_path, ds_name)
+            files = os.listdir(ds_dir)
+            assert len(files) >= 2, f"Expected files for both systems in {ds_dir}"
+
+    def test_trec_file_qids_match_dataset(self, temp_output_dir):
+        """TREC files should contain qids appropriate for their dataset."""
+        multi_suite = Suite.register(
+            "test_qid_correctness",
+            datasets=["vaswani"],
+            names=["vaswani_test"],
+            metadata={"official_measures": [nDCG @ 10]},
+        )
+
+        def pipeline_gen(context):
+            yield DummyRankingTransformer(), "test_system"
+
+        save_path = os.path.join(temp_output_dir, "results_qids")
+        multi_suite(pipeline_gen, save_dir=save_path)
+
+        ds_dir = os.path.join(save_path, "vaswani_test")
+
+        # Read and verify TREC file content
+        for filename in os.listdir(ds_dir):
+            filepath = os.path.join(ds_dir, filename)
+            if os.path.isfile(filepath):
+                try:
+                    with gzip.open(filepath, "rt") as f:
+                        lines = f.readlines()
+                except (OSError, gzip.BadGzipFile):
+                    with open(filepath, "r") as f:
+                        lines = f.readlines()
+
+                # Extract qids from TREC format (qid is first field)
+                qids = set(line.split()[0] for line in lines if line.strip())
+
+                # Verify qids are non-empty (basic sanity check)
+                assert len(qids) > 0, "TREC file should contain queries"

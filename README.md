@@ -96,6 +96,23 @@ Key differences:
 - `index_dir` creates **per-corpus** subdirectories (e.g., `./indices/beir-arguana/`)
 - Multiple datasets sharing a corpus will reuse the same index directory
 
+### Skipping Existing Results
+
+When using `save_dir`, you can check if results already exist for all datasets in a corpus using `context.exists()`. This allows generators to skip expensive inference when results are already saved:
+
+```python
+def pipelines(context):
+    # Skip if all datasets already have this run file
+    if context.exists("BM25.res.gz"):
+        return
+
+    index = PisaIndex(context.path + "/index.pisa")
+    index.index(context.get_corpus_iter())
+    yield index.bm25(), "BM25"
+```
+
+`context.exists(filename)` returns `True` only if the file exists for **every** dataset in the corpus. If any dataset is missing the file, it returns `False` and the generator should produce the pipeline.
+
 ## 🛠️ Compatibility
 
 Works with modern PyTerrier and common extensions  

@@ -289,6 +289,132 @@ class TestSaveDirUnit:
         assert "save_dir" not in call_kwargs
 
 
+class TestSaveDirKwargsIsolation:
+    """Tests to verify save_dir kwargs are properly isolated between datasets."""
+
+    def test_sequential_mode_multiple_datasets_get_correct_save_dir(
+        self,
+        temp_dir,
+        mock_pt_get_dataset,
+        mock_pt_experiment,
+        cleanup_suite_registry,
+    ):
+        """Sequential mode: each dataset gets its own save_dir in pt.Experiment calls."""
+        with patch("ir_datasets.docs_parent_id") as mock_parent:
+            mock_parent.return_value = "shared_corpus"
+
+            test_suite = Suite.register(
+                "test_seq_multi_ds",
+                datasets=["vaswani", "vaswani"],
+                names=["dataset_a", "dataset_b"],
+                metadata={"official_measures": [nDCG @ 10]},
+            )
+
+            save_path = os.path.join(temp_dir, "results")
+
+            def pipeline_gen(context):
+                yield DummyTransformer(), "system_1"
+                yield DummyTransformer(), "system_2"
+
+            test_suite(pipeline_gen, save_dir=save_path)  # No baseline = sequential
+
+            # Verify pt.Experiment was called 4 times (2 pipelines x 2 datasets)
+            assert mock_pt_experiment.call_count == 4
+
+            # Verify each call got the correct save_dir
+            # Sequential mode: for each pipeline, iterate through all datasets
+            expected_calls = [
+                os.path.join(save_path, "dataset_a"),  # pipeline1, ds_a
+                os.path.join(save_path, "dataset_b"),  # pipeline1, ds_b
+                os.path.join(save_path, "dataset_a"),  # pipeline2, ds_a
+                os.path.join(save_path, "dataset_b"),  # pipeline2, ds_b
+            ]
+
+            for i, call in enumerate(mock_pt_experiment.call_args_list):
+                actual_save_dir = call[1].get("save_dir")
+                assert actual_save_dir == expected_calls[i], (
+                    f"Call {i}: expected {expected_calls[i]}, got {actual_save_dir}"
+                )
+
+    def test_grouped_mode_multiple_datasets_get_correct_save_dir(
+        self,
+        temp_dir,
+        mock_pt_get_dataset,
+        mock_pt_experiment,
+        cleanup_suite_registry,
+    ):
+        """Grouped mode: each dataset gets its own save_dir in pt.Experiment calls."""
+        with patch("ir_datasets.docs_parent_id") as mock_parent:
+            mock_parent.return_value = "shared_corpus"
+
+            test_suite = Suite.register(
+                "test_grp_multi_ds",
+                datasets=["vaswani", "vaswani"],
+                names=["dataset_a", "dataset_b"],
+                metadata={"official_measures": [nDCG @ 10]},
+            )
+
+            save_path = os.path.join(temp_dir, "results")
+
+            def pipeline_gen(context):
+                yield DummyTransformer(), "system_1"
+                yield DummyTransformer(), "system_2"
+
+            test_suite(pipeline_gen, save_dir=save_path, baseline=0)  # baseline = grouped
+
+            # Grouped mode: pt.Experiment called once per dataset, all pipelines together
+            assert mock_pt_experiment.call_count == 2
+
+            # Verify each call got the correct save_dir
+            expected_dirs = [
+                os.path.join(save_path, "dataset_a"),
+                os.path.join(save_path, "dataset_b"),
+            ]
+
+            for i, call in enumerate(mock_pt_experiment.call_args_list):
+                actual_save_dir = call[1].get("save_dir")
+                assert actual_save_dir == expected_dirs[i], (
+                    f"Call {i}: expected {expected_dirs[i]}, got {actual_save_dir}"
+                )
+
+    def test_three_datasets_all_get_unique_save_dirs(
+        self,
+        temp_dir,
+        mock_pt_get_dataset,
+        mock_pt_experiment,
+        cleanup_suite_registry,
+    ):
+        """With 3 datasets sharing corpus, each gets unique save_dir."""
+        with patch("ir_datasets.docs_parent_id") as mock_parent:
+            mock_parent.return_value = "shared_corpus"
+
+            test_suite = Suite.register(
+                "test_three_ds",
+                datasets=["vaswani", "vaswani", "vaswani"],
+                names=["ds_alpha", "ds_beta", "ds_gamma"],
+                metadata={"official_measures": [nDCG @ 10]},
+            )
+
+            save_path = os.path.join(temp_dir, "results")
+
+            def pipeline_gen(context):
+                yield DummyTransformer(), "system"
+
+            test_suite(pipeline_gen, save_dir=save_path)
+
+            assert mock_pt_experiment.call_count == 3
+
+            save_dirs = [
+                call[1].get("save_dir") for call in mock_pt_experiment.call_args_list
+            ]
+            expected = [
+                os.path.join(save_path, "ds_alpha"),
+                os.path.join(save_path, "ds_beta"),
+                os.path.join(save_path, "ds_gamma"),
+            ]
+            assert save_dirs == expected
+
+
 # ---------- index_dir Tests ----------
 
 

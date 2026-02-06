@@ -762,20 +762,34 @@ class Suite(ABC, metaclass=SuiteMeta):
 
         # Extract index_dir before the corpus loop (pop so it doesn't go to pt.Experiment)
         index_dir = experiment_kwargs.pop("index_dir", None)
+        # Get save_dir for context (don't pop - still needed for pt.Experiment later)
+        save_dir = experiment_kwargs.get("save_dir", None)
 
         for corpus_id, corpus_ds, members in self._iter_corpus_groups():
             # If a subset was requested, skip this corpus unless it contains the subset
             if subset and all(name != subset for name, _ in members):
                 continue
 
+            # Collect dataset names for this corpus (for exists() checks)
+            dataset_names = [name for name, _ in members]
+
             # Single shared context per corpus (indexing happens once here)
             if index_dir is not None:
                 formatted_corpus_id = corpus_id.replace("/", "-").lower()
                 corpus_index_dir = f"{index_dir}/{formatted_corpus_id}"
                 os.makedirs(corpus_index_dir, exist_ok=True)
-                context = DatasetContext(corpus_ds, path=corpus_index_dir)
+                context = DatasetContext(
+                    corpus_ds,
+                    path=corpus_index_dir,
+                    save_dir=save_dir,
+                    dataset_names=dataset_names,
+                )
             else:
-                context = DatasetContext(corpus_ds)
+                context = DatasetContext(
+                    corpus_ds,
+                    save_dir=save_dir,
+                    dataset_names=dataset_names,
+                )
 
             if coerce_grouped:
                 # Materialise all pipelines ONCE for the corpus
@@ -823,11 +837,11 @@ class Suite(ABC, metaclass=SuiteMeta):
                 for pipeline, name in self.coerce_pipelines_sequential(
                     context, ranking_generators
                 ):
-                    kwargs = experiment_kwargs.copy()
                     for ds_name, ds_id_or_obj in members:
                         if subset and ds_name != subset:
                             continue
 
+                        kwargs = experiment_kwargs.copy()
                         ds_member = self._get_dataset_object(ds_id_or_obj)
                         topics, qrels = self._topics_qrels(ds_member, self._query_field)
 
