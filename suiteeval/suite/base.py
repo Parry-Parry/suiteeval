@@ -3,10 +3,11 @@ from __future__ import annotations
 from abc import ABCMeta, ABC
 import builtins
 from collections.abc import Sequence as runtime_Sequence, Iterator
+import gzip
 import inspect
 import os
 from functools import cache
-from typing import Callable, Generator, Optional, Any, Tuple, Union, Sequence
+from typing import Callable, Generator, Optional, Any, Tuple, Union, Sequence, List
 from logging import getLogger
 
 import numpy as np
@@ -20,6 +21,52 @@ from suiteeval.context import DatasetContext
 from suiteeval.utility import geometric_mean
 
 logger = getLogger(__name__)
+
+
+def _load_run_file(filepath: str) -> pd.DataFrame:
+    """Load a TREC run file (gzipped) into a DataFrame."""
+    with gzip.open(filepath, "rt") as f:
+        # TREC format: qid iter docno rank score run_name
+        df = pd.read_csv(
+            f,
+            sep=r"\s+",
+            header=None,
+            names=["qid", "iter", "docno", "rank", "score", "name"],
+        )
+    return df[["qid", "docno", "score", "rank"]]
+
+
+def _load_all_run_files(
+    name: str,
+    save_dir: str,
+    dataset_names: List[str],
+) -> pd.DataFrame:
+    """Load all run files for a pipeline across all datasets into a single DataFrame."""
+    dfs = []
+    for ds_name in dataset_names:
+        formatted = ds_name.replace("/", "-").lower()
+        filepath = os.path.join(save_dir, formatted, f"{name}.res.gz")
+        dfs.append(_load_run_file(filepath))
+    return pd.concat(dfs, ignore_index=True)
+
+
+def _can_skip_pipeline(
+    name: str,
+    save_dir: str,
+    dataset_names: List[str],
+    save_mode: str,
+) -> bool:
+    """Check if pipeline can be skipped based on existing files and save_mode."""
+    if save_mode == "overwrite":
+        return False  # Always rerun
+
+    # Check if file exists for ALL datasets
+    for ds_name in dataset_names:
+        formatted = ds_name.replace("/", "-").lower()
+        filepath = os.path.join(save_dir, formatted, f"{name}.res.gz")
+        if not os.path.exists(filepath):
+            return False
+    return True
 
 
 class SuiteMeta(ABCMeta):
@@ -762,15 +809,16 @@ class Suite(ABC, metaclass=SuiteMeta):
 
         # Extract index_dir before the corpus loop (pop so it doesn't go to pt.Experiment)
         index_dir = experiment_kwargs.pop("index_dir", None)
-        # Get save_dir for context (don't pop - still needed for pt.Experiment later)
+        # Get save_dir and save_mode for skip logic (don't pop - still needed later)
         save_dir = experiment_kwargs.get("save_dir", None)
+        save_mode = experiment_kwargs.get("save_mode", "warn")
 
         for corpus_id, corpus_ds, members in self._iter_corpus_groups():
             # If a subset was requested, skip this corpus unless it contains the subset
             if subset and all(name != subset for name, _ in members):
                 continue
 
-            # Collect dataset names for this corpus (for exists() checks)
+            # Collect dataset names for this corpus (for skip checks)
             dataset_names = [name for name, _ in members]
 
             # Single shared context per corpus (indexing happens once here)
@@ -778,18 +826,9 @@ class Suite(ABC, metaclass=SuiteMeta):
                 formatted_corpus_id = corpus_id.replace("/", "-").lower()
                 corpus_index_dir = f"{index_dir}/{formatted_corpus_id}"
                 os.makedirs(corpus_index_dir, exist_ok=True)
-                context = DatasetContext(
-                    corpus_ds,
-                    path=corpus_index_dir,
-                    save_dir=save_dir,
-                    dataset_names=dataset_names,
-                )
+                context = DatasetContext(corpus_ds, path=corpus_index_dir)
             else:
-                context = DatasetContext(
-                    corpus_ds,
-                    save_dir=save_dir,
-                    dataset_names=dataset_names,
-                )
+                context = DatasetContext(corpus_ds)
 
             if coerce_grouped:
                 # Materialise all pipelines ONCE for the corpus
@@ -797,6 +836,26 @@ class Suite(ABC, metaclass=SuiteMeta):
                     context, ranking_generators
                 )
                 save_dir = experiment_kwargs.pop("save_dir", None)
+
+                # Check which pipelines can be skipped (have existing run files)
+                # and load their combined results into transformers
+                skip_indices = set()
+                loaded_pipelines = {}  # index -> loaded transformer
+                if save_dir and names:
+                    for i, name in enumerate(names):
+                        if name and _can_skip_pipeline(
+                            name, save_dir, dataset_names, save_mode
+                        ):
+                            skip_indices.add(i)
+                            logger.info(
+                                f"Skipping pipeline '{name}': loading from existing run files"
+                            )
+                            # Load all run files for this pipeline into one transformer
+                            combined_df = _load_all_run_files(
+                                name, save_dir, dataset_names
+                            )
+                            loaded_pipelines[i] = pt.Transformer.from_df(combined_df)
+
                 # Evaluate the same systems across each dataset that shares this corpus
                 for ds_name, ds_id_or_obj in members:
                     kwargs = experiment_kwargs.copy()
@@ -806,24 +865,60 @@ class Suite(ABC, metaclass=SuiteMeta):
                     ds_member = self._get_dataset_object(ds_id_or_obj)
                     topics, qrels = self._topics_qrels(ds_member, self._query_field)
 
+                    if not isinstance(ds_name, str):
+                        ds_name = self._get_irds_id(ds_name)
+                    formatted_ds_name = ds_name.replace("/", "-").lower()
+
                     if save_dir is not None:
-                        if not isinstance(ds_name, str):
-                            ds_name = self._get_irds_id(ds_name)
-                        formatted_ds_name = ds_name.replace("/", "-").lower()
                         ds_save_dir = f"{save_dir}/{formatted_ds_name}"
                         kwargs["save_dir"] = ds_save_dir
                         os.makedirs(ds_save_dir, exist_ok=True)
 
-                    df = pt.Experiment(
-                        pipelines,
-                        eval_metrics=eval_metrics or self.get_measures(ds_name),
-                        topics=topics,
-                        qrels=qrels,
-                        names=names,
-                        **kwargs,
-                    )
-                    df["dataset"] = ds_name
-                    results.append(df)
+                    # Handle skipped pipelines separately
+                    if skip_indices:
+                        # Evaluate skipped pipelines from loaded run files
+                        for i in skip_indices:
+                            loaded_pipeline = loaded_pipelines[i]
+                            df = pt.Experiment(
+                                [loaded_pipeline],
+                                eval_metrics=eval_metrics or self.get_measures(ds_name),
+                                topics=topics,
+                                qrels=qrels,
+                                names=[names[i]],
+                            )
+                            df["dataset"] = ds_name
+                            results.append(df)
+
+                        # Evaluate non-skipped pipelines normally
+                        non_skipped_pipelines = [
+                            p for i, p in enumerate(pipelines) if i not in skip_indices
+                        ]
+                        non_skipped_names = [
+                            n for i, n in enumerate(names) if i not in skip_indices
+                        ]
+                        if non_skipped_pipelines:
+                            df = pt.Experiment(
+                                non_skipped_pipelines,
+                                eval_metrics=eval_metrics or self.get_measures(ds_name),
+                                topics=topics,
+                                qrels=qrels,
+                                names=non_skipped_names,
+                                **kwargs,
+                            )
+                            df["dataset"] = ds_name
+                            results.append(df)
+                    else:
+                        # No skipping - run all pipelines normally
+                        df = pt.Experiment(
+                            pipelines,
+                            eval_metrics=eval_metrics or self.get_measures(ds_name),
+                            topics=topics,
+                            qrels=qrels,
+                            names=names,
+                            **kwargs,
+                        )
+                        df["dataset"] = ds_name
+                        results.append(df)
 
                 # Release materialised pipelines after all member datasets are processed
                 try:
@@ -837,6 +932,38 @@ class Suite(ABC, metaclass=SuiteMeta):
                 for pipeline, name in self.coerce_pipelines_sequential(
                     context, ranking_generators
                 ):
+                    # Check if we can skip this pipeline (load from existing files)
+                    if (
+                        save_dir
+                        and name
+                        and _can_skip_pipeline(name, save_dir, dataset_names, save_mode)
+                    ):
+                        logger.info(f"Skipping pipeline '{name}': loading from existing run files")
+                        # Load all run files into a single DataFrame
+                        combined_df = _load_all_run_files(name, save_dir, dataset_names)
+                        loaded_pipeline = pt.Transformer.from_df(combined_df)
+
+                        for ds_name, ds_id_or_obj in members:
+                            if subset and ds_name != subset:
+                                continue
+
+                            if not isinstance(ds_name, str):
+                                ds_name = self._get_irds_id(ds_name)
+
+                            ds_member = self._get_dataset_object(ds_id_or_obj)
+                            topics, qrels = self._topics_qrels(ds_member, self._query_field)
+
+                            df = pt.Experiment(
+                                [loaded_pipeline],
+                                eval_metrics=eval_metrics or self.get_measures(ds_name),
+                                topics=topics,
+                                qrels=qrels,
+                                names=[name],
+                            )
+                            df["dataset"] = ds_name
+                            results.append(df)
+                        continue  # Skip to next pipeline
+
                     for ds_name, ds_id_or_obj in members:
                         if subset and ds_name != subset:
                             continue

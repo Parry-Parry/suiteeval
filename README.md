@@ -96,22 +96,24 @@ Key differences:
 - `index_dir` creates **per-corpus** subdirectories (e.g., `./indices/beir-arguana/`)
 - Multiple datasets sharing a corpus will reuse the same index directory
 
-### Skipping Existing Results
+### Automatic Result Caching
 
-When using `save_dir`, you can check if results already exist for all datasets in a corpus using `context.exists()`. This allows generators to skip expensive inference when results are already saved:
+When using `save_dir`, SuiteEval automatically skips inference for pipelines that already have saved run files. If a `{pipeline_name}.res.gz` file exists for all datasets in a corpus, the suite loads results from disk instead of re-running the pipeline.
 
 ```python
-def pipelines(context):
-    # Skip if all datasets already have this run file
-    if context.exists("BM25.res.gz"):
-        return
+# First run: executes inference and saves results
+results = BEIR(pipelines, save_dir="./results")
 
-    index = PisaIndex(context.path + "/index.pisa")
-    index.index(context.get_corpus_iter())
-    yield index.bm25(), "BM25"
+# Second run: automatically loads from ./results/{dataset}/{name}.res.gz
+results = BEIR(pipelines, save_dir="./results")
 ```
 
-`context.exists(filename)` returns `True` only if the file exists for **every** dataset in the corpus. If any dataset is missing the file, it returns `False` and the generator should produce the pipeline.
+To force re-running inference, use `save_mode="overwrite"`:
+
+```python
+# Always re-run inference, even if files exist
+results = BEIR(pipelines, save_dir="./results", save_mode="overwrite")
+```
 
 ## 🛠️ Compatibility
 
