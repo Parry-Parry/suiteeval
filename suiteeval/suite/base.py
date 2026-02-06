@@ -464,8 +464,18 @@ class Suite(ABC, metaclass=SuiteMeta):
         for gen in gens:
             out = gen(context)
             if inspect.isgenerator(out) or isinstance(out, Iterator):
-                for item in out:
-                    yield from _yield_item(item)
+                try:
+                    for item in out:
+                        yield from _yield_item(item)
+                except RuntimeError as exc:
+                    # PEP 479 turns leaked StopIteration into RuntimeError; surface a clear message.
+                    if "StopIteration" in str(exc):
+                        raise ValueError(
+                            "Pipeline generator raised StopIteration. "
+                            "Use `return` to end a generator, or catch StopIteration "
+                            "from `next()` inside the generator."
+                        ) from exc
+                    raise
             else:
                 if isinstance(out, tuple):
                     _pipelines, *_rest = out
@@ -535,8 +545,18 @@ class Suite(ABC, metaclass=SuiteMeta):
         for gen in gens:
             out = gen(context)
             if inspect.isgenerator(out) or isinstance(out, Iterator):
-                for item in out:
-                    _emit_item_to_lists(item)
+                try:
+                    for item in out:
+                        _emit_item_to_lists(item)
+                except RuntimeError as exc:
+                    # PEP 479 turns leaked StopIteration into RuntimeError; surface a clear message.
+                    if "StopIteration" in str(exc):
+                        raise ValueError(
+                            "Pipeline generator raised StopIteration. "
+                            "Use `return` to end a generator, or catch StopIteration "
+                            "from `next()` inside the generator."
+                        ) from exc
+                    raise
             else:
                 if isinstance(out, tuple):
                     _pipelines, *_rest = out
