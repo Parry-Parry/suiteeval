@@ -130,6 +130,7 @@ For older environments, ensure standard PyTerrier transformer interfaces.
 
 | Version | Date       | Changes                                              |
 |--------:|------------|------------------------------------------------------|
+|   0.1.7 | 2026-02-16 | Tempoary removal of DL23 until qrels are adeed |
 |   0.1.6 | 2026-02-03 | Fix duplicate Overall rows, auto-detect all metrics  |
 |   0.1.5 | 2026-01-07 | Custom index folder support for persistent indices   |
 |   0.1.4 | 2025-12-01 | Fix save directory handling                          |
