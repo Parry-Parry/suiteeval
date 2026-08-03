@@ -44,10 +44,6 @@ class DocumentFilter(pt.Transformer):
         out = inp.merge(flagged_df.assign(_ban=1), on=["qid", "docno"], how="left")
         return out[out["_ban"].isna()].drop(columns=["_ban"])
 
-    def transform_outputs(self, input_columns):
-        pt.validate.result_frame(input_columns, context=self)
-        return list(input_columns)
-
 
 class _BRIGHT(Suite):
     """
