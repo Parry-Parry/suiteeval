@@ -37,6 +37,9 @@ class DocumentFilter(pt.Transformer):
         )
 
     def transform(self, inp: pd.DataFrame) -> pd.DataFrame:
+        pt.validate.result_frame(inp, context=self)
+        if len(inp) == 0:
+            return inp
         flagged_df = pd.DataFrame(list(self._flagged), columns=["qid", "docno"])
         out = inp.merge(flagged_df.assign(_ban=1), on=["qid", "docno"], how="left")
         return out[out["_ban"].isna()].drop(columns=["_ban"])
