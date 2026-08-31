@@ -1,7 +1,4 @@
-from typing import Any, Sequence, Optional, Union
-
 from ir_measures import nDCG
-import pandas as pd
 
 from suiteeval.suite.beir import _BEIR
 
@@ -39,60 +36,13 @@ class _NanoBEIR(_BEIR):
 
     _datasets = datasets
     _measures = measures
-    metadata = {
+    _metadata = {
         "official_measures": measures,
-        "description": "Nano Beir is a smaller version (max 50 queries per benchmark) of the Beir suite of benchmarks to test zero-shot transfer.",
+        "description": (
+            "Nano Beir is a smaller version (max 50 queries per benchmark) of the "
+            "Beir suite of benchmarks to test zero-shot transfer."
+        ),
     }
-
-    def __call__(
-        self,
-        pipelines: Sequence[Any] = None,
-        eval_metrics: Sequence[Any] = None,
-        subset: Optional[str] = None,
-        perquery: bool = False,
-        batch_size: Optional[int] = None,
-        filter_by_qrels: bool = False,
-        filter_by_topics: bool = True,
-        baseline: Optional[int] = None,
-        test: str = "t",
-        correction: Optional[str] = None,
-        correction_alpha: float = 0.05,
-        highlight: Optional[str] = None,
-        round: Optional[Union[int, dict[str, int]]] = None,
-        verbose: bool = False,
-        save_dir: Optional[str] = None,
-        save_mode: str = "warn",
-        save_format: str = "trec",
-        precompute_prefix: bool = False,
-        index_dir: Optional[str] = None,
-    ) -> pd.DataFrame:
-        results = super().__call__(
-            pipelines,
-            eval_metrics=eval_metrics,
-            subset=subset,
-            perquery=perquery,
-            batch_size=batch_size,
-            filter_by_qrels=filter_by_qrels,
-            filter_by_topics=filter_by_topics,
-            baseline=baseline,
-            test=test,
-            correction=correction,
-            correction_alpha=correction_alpha,
-            highlight=highlight,
-            round=round,
-            verbose=verbose,
-            save_dir=save_dir,
-            save_mode=save_mode,
-            save_format=save_format,
-            precompute_prefix=precompute_prefix,
-            index_dir=index_dir,
-        )
-
-        if results is None or results.empty:
-            return pd.DataFrame()
-
-        # Note: compute_overall_mean is handled by parent _BEIR.__call__
-        return results
 
 
 NanoBEIR = _NanoBEIR()

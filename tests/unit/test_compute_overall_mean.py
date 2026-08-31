@@ -9,8 +9,6 @@ These tests verify:
 
 import pytest
 import pandas as pd
-import numpy as np
-from unittest.mock import MagicMock, patch
 
 from ir_measures import nDCG
 
@@ -46,23 +44,27 @@ def mock_suite(cleanup_suite_registry):
 @pytest.fixture
 def sample_results_single_metric():
     """Sample results with a single metric."""
-    return pd.DataFrame({
-        "dataset": ["ds1", "ds1", "ds2", "ds2"],
-        "name": ["model_a", "model_b", "model_a", "model_b"],
-        "nDCG@10": [0.5, 0.6, 0.7, 0.8],
-    })
+    return pd.DataFrame(
+        {
+            "dataset": ["ds1", "ds1", "ds2", "ds2"],
+            "name": ["model_a", "model_b", "model_a", "model_b"],
+            "nDCG@10": [0.5, 0.6, 0.7, 0.8],
+        }
+    )
 
 
 @pytest.fixture
 def sample_results_multiple_metrics():
     """Sample results with multiple metrics."""
-    return pd.DataFrame({
-        "dataset": ["ds1", "ds1", "ds2", "ds2"],
-        "name": ["model_a", "model_b", "model_a", "model_b"],
-        "nDCG@10": [0.5, 0.6, 0.7, 0.8],
-        "AP@10": [0.4, 0.5, 0.6, 0.7],
-        "R@100": [0.8, 0.85, 0.9, 0.95],
-    })
+    return pd.DataFrame(
+        {
+            "dataset": ["ds1", "ds1", "ds2", "ds2"],
+            "name": ["model_a", "model_b", "model_a", "model_b"],
+            "nDCG@10": [0.5, 0.6, 0.7, 0.8],
+            "AP@10": [0.4, 0.5, 0.6, 0.7],
+            "R@100": [0.8, 0.85, 0.9, 0.95],
+        }
+    )
 
 
 # ---------- Tests for geometric_mean ----------
@@ -105,11 +107,13 @@ class TestComputeOverallMean:
 
     def test_single_model_single_dataset(self, mock_suite):
         """Single model, single dataset produces one Overall row."""
-        results = pd.DataFrame({
-            "dataset": ["ds1"],
-            "name": ["model_a"],
-            "nDCG@10": [0.5],
-        })
+        results = pd.DataFrame(
+            {
+                "dataset": ["ds1"],
+                "name": ["model_a"],
+                "nDCG@10": [0.5],
+            }
+        )
 
         output = mock_suite.compute_overall_mean(results)
 
@@ -118,7 +122,9 @@ class TestComputeOverallMean:
         assert overall_rows.iloc[0]["name"] == "model_a"
         assert overall_rows.iloc[0]["nDCG@10"] == pytest.approx(0.5)
 
-    def test_multiple_models_multiple_datasets(self, mock_suite, sample_results_single_metric):
+    def test_multiple_models_multiple_datasets(
+        self, mock_suite, sample_results_single_metric
+    ):
         """Multiple models across multiple datasets aggregate correctly."""
         output = mock_suite.compute_overall_mean(sample_results_single_metric)
 
@@ -132,7 +138,9 @@ class TestComputeOverallMean:
             geometric_mean([0.5, 0.7])
         )
 
-    def test_auto_detects_all_metric_columns(self, mock_suite, sample_results_multiple_metrics):
+    def test_auto_detects_all_metric_columns(
+        self, mock_suite, sample_results_multiple_metrics
+    ):
         """CRITICAL: All metric columns should get Overall values, not just defaults."""
         output = mock_suite.compute_overall_mean(sample_results_multiple_metrics)
 
@@ -144,7 +152,9 @@ class TestComputeOverallMean:
             # Verify values are computed (not NaN)
             assert overall_rows[metric].notna().all()
 
-    def test_no_duplicates_when_called_twice(self, mock_suite, sample_results_single_metric):
+    def test_no_duplicates_when_called_twice(
+        self, mock_suite, sample_results_single_metric
+    ):
         """CRITICAL: Calling compute_overall_mean twice should not create duplicates."""
         # First call
         output1 = mock_suite.compute_overall_mean(sample_results_single_metric)

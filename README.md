@@ -148,6 +148,57 @@ To force re-running inference, use `save_mode="overwrite"`:
 results = BEIR(pipelines, save_dir="./results", save_mode="overwrite")
 ```
 
+## 🔧 Customising a Suite
+
+A suite run is a fixed sequence of small, overridable steps. To change one part of
+the computation, override the hook that covers it rather than reimplementing
+`__call__`:
+
+```
+__call__
+  └─ resolve_config          split call arguments into a RunConfig
+  └─ run
+     └─ iter_corpus_groups   group datasets by shared corpus
+        └─ select_members    pick datasets to evaluate in this group
+        └─ build_context     build the shared DatasetContext (indexes once)
+        └─ iter_pipeline_batches
+           └─ wrap_pipeline          decorate each pipeline
+           └─ prepare_topics_qrels   fetch topics and qrels
+           └─ evaluate_batch
+              ├─ has_cached_run / run_file_path / load_cached_run
+              └─ run_experiment      the pt.Experiment call
+                 └─ measures_for     pick metrics for a dataset
+           └─ annotate_results       tag rows with their dataset
+           └─ release_pipelines      free memory between batches
+  └─ postprocess_results     aggregate the concatenated table
+     └─ compute_overall_mean
+```
+
+Wrap every pipeline — applies to both sequential and grouped execution:
+
+```python
+class MySuite(Suite):
+    _datasets = ["my-corpus/test"]
+
+    def wrap_pipeline(self, pipeline, context):
+        return pipeline >> MyResultFilter(context.dataset.get_qrels())
+```
+
+Reshape the results table before the `Overall` rows are added:
+
+```python
+def postprocess_results(self, results, config):
+    results = merge_sub_collections(results)
+    return super().postprocess_results(results, config)
+```
+
+Change where runs are cached:
+
+```python
+def run_file_path(self, save_dir, dataset_name, pipeline_name):
+    return os.path.join(save_dir, f"{dataset_name}--{pipeline_name}.res.gz")
+```
+
 ## 🛠️ Compatibility
 
 Works with modern PyTerrier and common extensions  
@@ -163,6 +214,7 @@ For older environments, ensure standard PyTerrier transformer interfaces.
 
 | Version | Date       | Changes                                              |
 |--------:|------------|------------------------------------------------------|
+|   0.1.8 | 2026-08-30 | Overridable evaluation hooks; fix `save_dir` being dropped after the first corpus |
 |   0.1.7 | 2026-02-16 | Tempoary removal of DL23 until qrels are adeed |
 |   0.1.6 | 2026-02-03 | Fix duplicate Overall rows, auto-detect all metrics  |
 |   0.1.5 | 2026-01-07 | Custom index folder support for persistent indices   |

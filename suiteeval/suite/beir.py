@@ -1,14 +1,10 @@
-import builtins
-from collections.abc import Sequence as runtime_Sequence
-from typing import Any, Sequence, Optional, Union, Tuple
-
-from ir_measures import nDCG
 import pandas as pd
 import pyterrier as pt
+from ir_measures import nDCG
 from pyterrier import Transformer
 
 from suiteeval.context import DatasetContext
-from suiteeval.suite.base import Suite
+from suiteeval.suite.base import RunConfig, Suite
 from suiteeval.utility import geometric_mean
 
 datasets = [
@@ -40,14 +36,17 @@ datasets = [
 ]
 measures = [nDCG @ 10]
 
+CQADUPSTACK_PREFIX = "beir/cqadupstack/"
+CQADUPSTACK_NAME = "beir/cqadupstack"
+
 
 def document_filter(row):
-    if row.qid == row.docno:
-        return False
-    return True
+    """Reject a result row whose document is the query itself."""
+    return row.qid != row.docno
 
 
 def dataframe_filter(df):
+    """Drop self-retrieved documents from a result frame."""
     return df[df.apply(document_filter, axis=1)]
 
 
@@ -61,8 +60,7 @@ class _BEIR(Suite):
 
     Example:
         from suiteeval.suite import BEIR
-        beir_suite = BEIR()
-        results = beir_suite(pipeline)
+        results = BEIR(pipeline)
     """
 
     _datasets = datasets
@@ -73,117 +71,41 @@ class _BEIR(Suite):
     }
     _query_field = "text"
 
-    def coerce_pipelines_sequential(
-        self,
-        context: DatasetContext,
-        pipeline_generators: "runtime_Sequence|builtins.callable",
-    ):
-        """
-        Wrap each streamed pipeline with a dataframe filter only for Quora,
-        preserving (pipeline, name) pairs and not materialising the sequence.
-        """
-        ds_str = context.dataset._irds_id.lower()
+    def wrap_pipeline(
+        self, pipeline: Transformer, context: DatasetContext
+    ) -> Transformer:
+        """Filter self-retrieved documents on Quora, where queries are also documents."""
+        if "quora" not in context.dataset._irds_id.lower():
+            return pipeline
+        return pipeline >> pt.apply.generic(dataframe_filter)
 
-        for p, nm in super().coerce_pipelines_sequential(context, pipeline_generators):
-            if "quora" in ds_str:
-                # Append the filter as a no-op transformer for other outputs
-                p = p >> pt.apply.generic(dataframe_filter)
-            yield p, nm
-
-    def coerce_pipelines_grouped(
-        self,
-        context: DatasetContext,
-        pipeline_generators: "runtime_Sequence|builtins.callable",
-    ) -> Tuple[list[Transformer], Optional[list[str]]]:
-        """
-        Materialise all pipelines (and names) via the superclass, then
-        append a dataframe filter only for Quora datasets.
-        """
-        pipelines, names = super().coerce_pipelines_grouped(
-            context, pipeline_generators
-        )
-
-        ds_str = context.dataset._irds_id.lower()
-
-        if "quora" in ds_str:
-            pipelines = [p >> pt.apply.generic(dataframe_filter) for p in pipelines]
-
-        return pipelines, names
-
-    def __call__(
-        self,
-        pipelines: Sequence[Any] = None,
-        eval_metrics: Sequence[Any] = None,
-        subset: Optional[str] = None,
-        perquery: bool = False,
-        batch_size: Optional[int] = None,
-        filter_by_qrels: bool = False,
-        filter_by_topics: bool = True,
-        baseline: Optional[int] = None,
-        test: str = "t",
-        correction: Optional[str] = None,
-        correction_alpha: float = 0.05,
-        highlight: Optional[str] = None,
-        round: Optional[Union[int, dict[str, int]]] = None,
-        verbose: bool = False,
-        save_dir: Optional[str] = None,
-        save_mode: str = "warn",
-        save_format: str = "trec",
-        precompute_prefix: bool = False,
-        index_dir: Optional[str] = None,
+    def postprocess_results(
+        self, results: pd.DataFrame, config: RunConfig
     ) -> pd.DataFrame:
-        results = super().__call__(
-            pipelines,
-            eval_metrics=eval_metrics,
-            subset=subset,
-            compute_overall=False,  # BEIR computes overall after CQADupStack aggregation
-            perquery=perquery,
-            batch_size=batch_size,
-            filter_by_qrels=filter_by_qrels,
-            filter_by_topics=filter_by_topics,
-            baseline=baseline,
-            test=test,
-            correction=correction,
-            correction_alpha=correction_alpha,
-            highlight=highlight,
-            round=round,
-            verbose=verbose,
-            save_dir=save_dir,
-            save_mode=save_mode,
-            save_format=save_format,
-            precompute_prefix=precompute_prefix,
-            index_dir=index_dir,
-        )
+        """
+        Collapse the CQADupStack sub-datasets into a single row before aggregating.
 
-        if results is None or results.empty:
-            return pd.DataFrame()
+        CQADupStack counts as one BEIR dataset, so its twelve sub-collections are
+        reduced to their geometric mean and reported under ``beir/cqadupstack``.
+        """
+        if results.empty:
+            return results
 
-        cqadupstack = results[results["dataset"].str.startswith("beir/cqadupstack/")]
-        not_cqadupstack = results[
-            ~results["dataset"].str.startswith("beir/cqadupstack/")
-        ]
+        is_cqadupstack = results["dataset"].str.startswith(CQADUPSTACK_PREFIX)
+        if is_cqadupstack.any():
+            grouping = ["name", "qid"] if config.perquery else ["name"]
+            aggregated = (
+                results[is_cqadupstack]
+                .groupby(grouping)
+                .agg({col: geometric_mean for col in self.metric_columns(results)})
+                .reset_index()
+            )
+            aggregated["dataset"] = CQADUPSTACK_NAME
+            results = pd.concat(
+                [results[~is_cqadupstack], aggregated], ignore_index=True
+            )
 
-        # Group by name (and qid if perquery) to aggregate across cqadupstack sub-datasets
-        grouping = ["name"]
-        if perquery:
-            grouping.append("qid")
-
-        # Determine which metric columns to aggregate (exclude non-metric columns)
-        metric_cols = [
-            col
-            for col in cqadupstack.columns
-            if col not in grouping + ["dataset", "name", "qid"]
-        ]
-        agg_dict = {col: geometric_mean for col in metric_cols}
-
-        cqadupstack = cqadupstack.groupby(grouping).agg(agg_dict).reset_index()
-        cqadupstack["dataset"] = "beir/cqadupstack"
-        results = pd.concat([not_cqadupstack, cqadupstack], ignore_index=True)
-
-        if not perquery:
-            results = self.compute_overall_mean(results)
-
-        return results
+        return super().postprocess_results(results, config)
 
 
 BEIR = _BEIR()

@@ -1,8 +1,5 @@
-import math
-import pytest
 import pandas as pd
 from pyterrier import Transformer
-from ir_measures import nDCG
 
 
 from suiteeval.suite.beir import BEIR
