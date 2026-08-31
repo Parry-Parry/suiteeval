@@ -77,4 +77,5 @@ would produce a table as follows:
    :caption: Contents
 
    Suites <suites>
+   Extending a Suite <extending>
    API Reference <api>

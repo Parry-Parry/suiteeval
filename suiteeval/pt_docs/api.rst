@@ -13,6 +13,10 @@ Abstract suite interface.
    :show-inheritance:
    :special-members: __call__
 
+.. autoclass:: suiteeval.suite.base.RunConfig
+   :members:
+   :undoc-members:
+
 suiteeval.context
 =================
 

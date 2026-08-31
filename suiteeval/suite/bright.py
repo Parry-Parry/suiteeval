@@ -1,10 +1,7 @@
-import builtins
-from collections.abc import Sequence as runtime_Sequence
-from typing import Optional, Tuple
-
-import pyterrier as pt
 import pandas as pd
+import pyterrier as pt
 from ir_measures import nDCG
+from pyterrier import Transformer
 
 from suiteeval.context import DatasetContext
 from suiteeval.suite.base import Suite
@@ -26,22 +23,23 @@ datasets = [
 
 measures = [nDCG @ 10]
 
+FILTER_VALUE = -100
+
 
 class DocumentFilter(pt.Transformer):
-    def __init__(self, qrels: pd.DataFrame, filter_value: int = -100):
+    """Drop ``(qid, docno)`` pairs flagged as excluded in the qrels."""
+
+    def __init__(self, qrels: pd.DataFrame, filter_value: int = FILTER_VALUE):
         super().__init__()
-        self._flagged = set(
-            qrels.loc[qrels["relevance"] == filter_value, ["qid", "docno"]].itertuples(
-                index=False, name=None
-            )
-        )
+        self._flagged = qrels.loc[
+            qrels["relevance"] == filter_value, ["qid", "docno"]
+        ].drop_duplicates()
 
     def transform(self, inp: pd.DataFrame) -> pd.DataFrame:
-        pt.validate.result_frame(inp, context=self)
-        if len(inp) == 0:
+        pt.validate.result_frame(inp)
+        if len(inp) == 0 or len(self._flagged) == 0:
             return inp
-        flagged_df = pd.DataFrame(list(self._flagged), columns=["qid", "docno"])
-        out = inp.merge(flagged_df.assign(_ban=1), on=["qid", "docno"], how="left")
+        out = inp.merge(self._flagged.assign(_ban=1), on=["qid", "docno"], how="left")
         return out[out["_ban"].isna()].drop(columns=["_ban"])
 
 
@@ -58,38 +56,13 @@ class _BRIGHT(Suite):
         "description": " BRIGHT is a suite datasets for evaluating retrieval that requires reasoning.",
     }
 
-    def coerce_pipelines_sequential(
-        self,
-        context: DatasetContext,
-        pipeline_generators: "runtime_Sequence|builtins.callable",
-    ):
-        """
-        Wrap each streamed pipeline with a dataframe filter only for Quora,
-        preserving (pipeline, name) pairs and not materialising the sequence.
-        """
-        for p, nm in super().coerce_pipelines_sequential(context, pipeline_generators):
-            p = p >> DocumentFilter(context.dataset.get_qrels())
-            yield p, nm
-
-    def coerce_pipelines_grouped(
-        self,
-        context: DatasetContext,
-        pipeline_generators: "runtime_Sequence|builtins.callable",
-    ) -> Tuple[list[pt.Transformer], Optional[list[str]]]:
-        """
-        Materialise all pipelines (and names) via the superclass, then
-        append a dataframe filter for qrels.
-        """
-        pipelines, names = super().coerce_pipelines_grouped(
-            context, pipeline_generators
-        )
-        pipelines = [
-            p >> DocumentFilter(context.dataset.get_qrels()) for p in pipelines
-        ]
-
-        return pipelines, names
+    def wrap_pipeline(
+        self, pipeline: Transformer, context: DatasetContext
+    ) -> Transformer:
+        """Append a filter removing documents flagged as excluded in the qrels."""
+        return pipeline >> DocumentFilter(context.dataset.get_qrels())
 
 
 BRIGHT = _BRIGHT()
 
-__all__ = ["BRIGHT"]
+__all__ = ["BRIGHT", "DocumentFilter"]

@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from abc import ABCMeta, ABC
-import builtins
-from collections.abc import Sequence as runtime_Sequence, Iterator
+from abc import ABC, ABCMeta
+from collections.abc import Iterator
 import gzip
-import inspect
 import os
-from functools import cache
-from typing import Callable, Generator, Optional, Any, Tuple, Union, Sequence
+from typing import Any, Generator, Optional, Sequence, Tuple, Union
 from logging import getLogger
 
 import numpy as np
@@ -18,50 +15,22 @@ import pyterrier as pt
 from pyterrier import Transformer
 
 from suiteeval.context import DatasetContext
+from suiteeval.suite.config import (
+    RUN_FILE_COLUMNS,
+    RunConfig,
+    ensure_string_ids,
+    slugify,
+)
+from suiteeval.suite.config import metric_columns as _metric_columns
+from suiteeval.suite.pipelines import (
+    NamedPipeline,
+    PipelineGenerators,
+    fill_names,
+    iter_generator_output,
+)
 from suiteeval.utility import geometric_mean
 
 logger = getLogger(__name__)
-
-
-def _load_run_file(filepath: str) -> pd.DataFrame:
-    """Load a TREC run file (gzipped) into a DataFrame."""
-    with gzip.open(filepath, "rt") as f:
-        # TREC format: qid iter docno rank score run_name
-        df = pd.read_csv(
-            f,
-            sep=r"\s+",
-            header=None,
-            names=["qid", "iter", "docno", "rank", "score", "name"],
-        )
-    df = df[["qid", "docno", "score", "rank"]]
-    return _ensure_string_ids(df)
-
-
-def _ensure_string_ids(df: pd.DataFrame, cols: Sequence[str] = ("qid", "docno")) -> pd.DataFrame:
-    """Coerce identifier columns to strings for safe joins/merges."""
-    for col in cols:
-        if col in df.columns:
-            df[col] = df[col].astype("string")
-    return df
-
-
-def _get_run_file_path(save_dir: str, ds_name: str, pipeline_name: str) -> str:
-    """Get the path to a run file for a specific dataset and pipeline."""
-    formatted = ds_name.replace("/", "-").lower()
-    return os.path.join(save_dir, formatted, f"{pipeline_name}.res.gz")
-
-
-def _can_skip_dataset(
-    save_dir: str,
-    ds_name: str,
-    pipeline_name: str,
-    save_mode: str,
-) -> bool:
-    """Check if a single dataset can be skipped for a pipeline."""
-    if save_mode == "overwrite":
-        return False
-    filepath = _get_run_file_path(save_dir, ds_name, pipeline_name)
-    return os.path.exists(filepath)
 
 
 class SuiteMeta(ABCMeta):
@@ -168,8 +137,31 @@ class Suite(ABC, metaclass=SuiteMeta):
         _metadata: Optional per-dataset or global metadata.
         _measures: A list of :class:`ir_measures.Measure` or a mapping from dataset name
             to such a list. When not provided, defaults are derived from metadata or
-            IRDS documentation; ultimately falling back to ``[nDCG@10]``.
+            IRDS documentation; ultimately falling back to ``_default_measures``.
+        _default_measures: Fallback measures when nothing else is configured.
         _query_field: Optional topic field name to use when fetching topics.
+
+    Evaluation runs through a chain of small, overridable steps. In call order:
+
+    ==============================  ==========================================
+    Hook                            Responsibility
+    ==============================  ==========================================
+    :meth:`resolve_config`          Split kwargs into a :class:`RunConfig`
+    :meth:`iter_corpus_groups`      Group datasets by shared corpus
+    :meth:`select_members`          Pick the datasets to evaluate in a group
+    :meth:`build_context`           Build the shared per-corpus context
+    :meth:`iter_pipeline_batches`   Decide how pipelines are batched
+    :meth:`wrap_pipeline`           Decorate each pipeline (filters, etc.)
+    :meth:`prepare_topics_qrels`    Fetch and normalise topics/qrels
+    :meth:`measures_for`            Choose metrics for a dataset
+    :meth:`has_cached_run` /
+    :meth:`load_cached_run` /
+    :meth:`run_file_path`           Reuse run files written by a previous call
+    :meth:`run_experiment`          The :func:`pyterrier.Experiment` call itself
+    :meth:`annotate_results`        Tag result rows with their dataset
+    :meth:`release_pipelines`       Free memory between batches
+    :meth:`postprocess_results`     Aggregate the concatenated results
+    ==============================  ==========================================
 
     Notes:
         Instances are singletons per subclass (enforced by :class:`SuiteMeta`).
@@ -178,8 +170,8 @@ class Suite(ABC, metaclass=SuiteMeta):
     _datasets: Union[list[str], dict[str, str]] = {}
     _dataset_ids: dict[str, str] = {}
     _metadata: dict[str, Any] = {}
-    _measures: Union[list[Measure], dict[str, list[Measure]]] = None
-    __default_measures: list[Measure] = [nDCG @ 10]
+    _measures: Union[list[Measure], dict[str, list[Measure]], None] = None
+    _default_measures: list[Measure] = [nDCG @ 10]
     _query_field: Optional[str] = None
 
     def __init__(self):
@@ -198,38 +190,36 @@ class Suite(ABC, metaclass=SuiteMeta):
                 "Suite _datasets must be a dict[name->id] or a list[dataset_id]"
             )
 
-        def _is_valid_dataset(ds: Any) -> bool:
-            """Check if ds is a string ID or a valid dataset object."""
-            if isinstance(ds, str):
-                return True
-            return (
-                hasattr(ds, "_irds_id")
-                and hasattr(ds, "get_topics")
-                and hasattr(ds, "get_qrels")
-            )
-
         if isinstance(self._datasets, dict):
             for name, ds in self._datasets.items():
                 if not isinstance(name, str):
                     raise AssertionError(
                         f"Suite _datasets keys must be strings, got {type(name)}"
                     )
-                if not _is_valid_dataset(ds):
-                    raise AssertionError(
-                        f"Suite _datasets[{name!r}] must be a string ID or a dataset "
-                        "object with _irds_id, get_topics, and get_qrels"
-                    )
+                self._validate_dataset(ds, repr(name))
         else:
             for i, ds in enumerate(self._datasets):
-                if not _is_valid_dataset(ds):
-                    raise AssertionError(
-                        f"Suite _datasets[{i}] must be a string ID or a dataset "
-                        "object with _irds_id, get_topics, and get_qrels"
-                    )
+                self._validate_dataset(ds, str(i))
 
         assert self._measures is not None, (
             "Suite must have measures defined in _measures"
         )
+
+    @staticmethod
+    def _validate_dataset(ds: Any, where: str) -> None:
+        """Raise unless ``ds`` is a string ID or a dataset-like object."""
+        if isinstance(ds, str):
+            return
+        if all(hasattr(ds, attr) for attr in ("_irds_id", "get_topics", "get_qrels")):
+            return
+        raise AssertionError(
+            f"Suite _datasets[{where}] must be a string ID or a dataset "
+            "object with _irds_id, get_topics, and get_qrels"
+        )
+
+    # ------------------------------------------------------------------
+    # Dataset resolution
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _get_irds_id(ds_id_or_obj: Any) -> str:
@@ -246,6 +236,13 @@ class Suite(ABC, metaclass=SuiteMeta):
             return ds_id_or_obj
         return ds_id_or_obj._irds_id
 
+    @classmethod
+    def _display_name(cls, name_or_obj: Any) -> str:
+        """Resolve a dataset key to the string used in results and paths."""
+        if isinstance(name_or_obj, str):
+            return name_or_obj
+        return cls._get_irds_id(name_or_obj)
+
     @staticmethod
     def _get_dataset_object(ds_id_or_obj: Any) -> pt.datasets.Dataset:
         """
@@ -261,26 +258,28 @@ class Suite(ABC, metaclass=SuiteMeta):
             return pt.get_dataset(f"irds:{ds_id_or_obj}")
         return ds_id_or_obj
 
-    def _iter_corpus_groups(self):
+    def _dataset_items(self) -> list[Tuple[Any, Any]]:
+        """Normalise ``_datasets`` to a list of ``(display_key, dataset_ref)``."""
+        if isinstance(self._datasets, dict):
+            return list(self._datasets.items())
+        return [(ds, ds) for ds in self._datasets]
+
+    def iter_corpus_groups(
+        self,
+    ) -> Iterator[Tuple[str, pt.datasets.Dataset, list[Tuple[Any, Any]]]]:
         """
-        Yield groups of datasets that share the same underlying corpus, determined by
-        ir_datasets.docs_parent_id(dataset_id).
+        Group the suite's datasets by the corpus they share.
+
+        Membership is decided by :func:`ir_datasets.docs_parent_id`, so datasets
+        built on the same document collection are indexed once. Override to
+        impose a different grouping.
 
         Yields:
-            (corpus_id: str,
-             corpus_ds: pt.datasets.Dataset,
-             members: list[tuple[str, Any]])  # [(display_name, dataset_id_or_obj), ...]
+            tuple[str, pyterrier.datasets.Dataset, list[tuple[Any, Any]]]:
+                ``(corpus_id, corpus_dataset, [(display_key, dataset_ref), ...])``.
         """
-        # normalise to a list of (name, ds_id_or_obj)
-        if isinstance(self._datasets, dict):
-            items = list(self._datasets.items())
-        else:
-            items = [(ds_id, ds_id) for ds_id in self._datasets]
-
-        # group by docs-parent (corpus) id
         groups: dict[str, dict] = {}
-        for name, ds_id_or_obj in items:
-            # Get the IRDS ID and determine corpus parent
+        for name, ds_id_or_obj in self._dataset_items():
             irds_id = self._get_irds_id(ds_id_or_obj)
             try:
                 corpus_id = irds.docs_parent_id(irds_id) or irds_id
@@ -288,23 +287,60 @@ class Suite(ABC, metaclass=SuiteMeta):
                 corpus_id = irds_id
 
             if corpus_id not in groups:
-                # Load the corpus dataset (handles both string IDs and objects)
                 corpus_ds = self._get_dataset_object(
                     corpus_id if isinstance(corpus_id, str) else irds_id
                 )
-                groups[corpus_id] = {
-                    "corpus_ds": corpus_ds,
-                    "members": [],
-                }
+                groups[corpus_id] = {"corpus_ds": corpus_ds, "members": []}
 
             groups[corpus_id]["members"].append((name, ds_id_or_obj))
 
         # deterministic iteration order (insertion order is fine here)
-        for corpus_id, g in groups.items():
-            yield corpus_id, g["corpus_ds"], g["members"]
+        for corpus_id, group in groups.items():
+            yield corpus_id, group["corpus_ds"], group["members"]
+
+    def select_members(
+        self, members: Sequence[Tuple[Any, Any]], subset: Optional[str]
+    ) -> list[Tuple[Any, Any]]:
+        """
+        Choose which members of a corpus group to evaluate.
+
+        Args:
+            members: ``(display_key, dataset_ref)`` pairs sharing one corpus.
+            subset: Optional display name to restrict evaluation to.
+
+        Returns:
+            list[tuple[Any, Any]]: The members to evaluate; empty skips the group.
+        """
+        if subset is None:
+            return list(members)
+        return [
+            (name, ds) for name, ds in members if self._display_name(name) == subset
+        ]
+
+    @property
+    def datasets(self) -> Generator[Tuple[str, pt.datasets.Dataset], None, None]:
+        """
+        Iterate over declared datasets yielding display name and PyTerrier dataset.
+
+        Yields:
+            tuple[str, pyterrier.datasets.Dataset]: Pairs of (name, dataset object).
+
+        Raises:
+            ValueError: If ``_datasets`` has an invalid type.
+        """
+        if not isinstance(self._datasets, (list, dict)):
+            raise ValueError(
+                "Suite _datasets must be a list or dict mapping names to dataset IDs."
+            )
+        for name, ds_id_or_obj in self._dataset_items():
+            yield self._display_name(name), self._get_dataset_object(ds_id_or_obj)
+
+    # ------------------------------------------------------------------
+    # Measures
+    # ------------------------------------------------------------------
 
     @staticmethod
-    def parse_measures(measures: list[Union[str, Measure]]) -> list[Measure]:
+    def parse_measures(measures: Sequence[Union[str, Measure]]) -> list[Measure]:
         """
         Convert a list of measure strings or :class:`ir_measures.Measure` objects
         into a flat ``list[Measure]``.
@@ -322,31 +358,26 @@ class Suite(ABC, metaclass=SuiteMeta):
                 or if an entry has an invalid type.
         """
         out: list[Measure] = []
-
-        def _ensure_list(x: Union[Measure, Sequence[Measure]]) -> list[Measure]:
-            if isinstance(x, Measure):
-                return [x]
-            return list(x)
-
         for m in measures:
             if isinstance(m, Measure):
                 out.append(m)
                 continue
 
-            if isinstance(m, str):
-                candidates: list[Measure] = []
-                for parser in (parse_measure, parse_trec_measure):
-                    try:
-                        parsed = parser(m)
-                        candidates.extend(_ensure_list(parsed))
-                    except ValueError:
-                        continue
-                if not candidates:
-                    raise ValueError(f"Unrecognised measure string: {m!r}")
-                out.extend(candidates)
-                continue
+            if not isinstance(m, str):
+                raise ValueError(f"Invalid measure type: {type(m)}")
 
-            raise ValueError(f"Invalid measure type: {type(m)}")
+            candidates: list[Measure] = []
+            for parser in (parse_measure, parse_trec_measure):
+                try:
+                    parsed = parser(m)
+                except ValueError:
+                    continue
+                candidates.extend(
+                    [parsed] if isinstance(parsed, Measure) else list(parsed)
+                )
+            if not candidates:
+                raise ValueError(f"Unrecognised measure string: {m!r}")
+            out.extend(candidates)
 
         return out
 
@@ -358,7 +389,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         2. Per-dataset ``metadata[name]['official_measures']`` if present.
         3. IRDS documentation ``official_measures`` for each dataset (when available).
 
-        If no measures are discovered, default to ``[nDCG@10]``.
+        If no measures are discovered, falls back to ``_default_measures``.
 
         Args:
             metadata: The suite metadata dictionary as configured at construction time.
@@ -366,93 +397,107 @@ class Suite(ABC, metaclass=SuiteMeta):
         Returns:
             None
         """
-
         if self._measures is not None:
             return
 
-        measures_accum: list[Measure] = []
+        measures: list[Measure] = []
         seen: set[str] = set()
 
-        def _add_many(items: Optional[list[Union[str, Measure]]]) -> None:
-            if not items:
-                return
-            for m in self.parse_measures(items):
-                sig = str(m)
-                if sig not in seen:
-                    measures_accum.append(m)
-                    seen.add(sig)
+        def _add_many(items: Optional[Sequence[Union[str, Measure]]]) -> None:
+            for m in self.parse_measures(items or []):
+                if str(m) not in seen:
+                    measures.append(m)
+                    seen.add(str(m))
 
-        # (1) global metadata
         if isinstance(metadata, dict):
+            # (1) global metadata, then (2) per-dataset metadata
             _add_many(metadata.get("official_measures"))
-
-        # (2) per-dataset metadata
-        if isinstance(metadata, dict):
-            # iterate over declared dataset names (works for dict; if list, keys are ids)
-            names_iter = (
-                self._datasets if isinstance(self._datasets, dict) else self._datasets
-            )
-            for name in names_iter:
-                md = metadata.get(name, {})
-                if isinstance(md, dict):
-                    _add_many(md.get("official_measures"))
+            for name in self._datasets:
+                per_dataset = metadata.get(name, {})
+                if isinstance(per_dataset, dict):
+                    _add_many(per_dataset.get("official_measures"))
 
         # (3) ir_datasets documentation
-        for name, ds_id in (
-            self._dataset_ids.items() if isinstance(self._dataset_ids, dict) else []
-        ):
-            try:
-                ds = irds.load(ds_id)
-                docs = getattr(ds, "documentation", lambda: None)()
-                if isinstance(docs, dict):
-                    _add_many(docs.get("official_measures"))
-            except Exception as e:
-                logger.warning(
-                    f"Failed to load measures from documentation for '{name}' ({ds_id}): {e}"
-                )
+        if isinstance(self._dataset_ids, dict):
+            for name, ds_id in self._dataset_ids.items():
+                try:
+                    docs = getattr(irds.load(ds_id), "documentation", lambda: None)()
+                    if isinstance(docs, dict):
+                        _add_many(docs.get("official_measures"))
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to load measures from documentation for '{name}' ({ds_id}): {e}"
+                    )
 
-        if not measures_accum:
-            logger.warning("No measures discovered; defaulting to [nDCG@10].")
-            measures_accum = [nDCG @ 10]
+        if not measures:
+            logger.warning(
+                f"No measures discovered; defaulting to {self._default_measures}."
+            )
+            measures = list(self._default_measures)
 
-        self._measures = measures_accum
+        self._measures = measures
 
-    @staticmethod
-    def _normalize_generators(
-        pipeline_generators: Union[Callable[[DatasetContext], Any], runtime_Sequence],
-        what: str,
-    ) -> list[Callable[[DatasetContext], Any]]:
+    def get_measures(self, dataset: str) -> list[Measure]:
         """
-        Normalize a callable or a sequence of callables to a list of callables.
+        Resolve the measures configured for a given dataset name.
 
         Args:
-            pipeline_generators: Either a single callable taking ``DatasetContext`` and
-                yielding pipelines, or a sequence of such callables.
-            what: Human-readable label used in error messages.
+            dataset: Dataset display name as used in this suite.
 
         Returns:
-            list[Callable[[DatasetContext], Any]]: The normalized list.
-
-        Raises:
-            TypeError: If the input is neither callable nor a sequence of callables.
+            list[Measure]: The list configured for this dataset (or the suite-wide
+                list if a single list is maintained). Falls back to
+                ``_default_measures`` when the dataset is unknown.
         """
-        if not isinstance(pipeline_generators, runtime_Sequence) or isinstance(
-            pipeline_generators, (str, bytes)
-        ):
-            if not builtins.callable(pipeline_generators):
-                raise TypeError(
-                    f"{what} must be a callable or a sequence of callables."
-                )
-            return [pipeline_generators]  # type: ignore[list-item]
-        if not all(builtins.callable(f) for f in pipeline_generators):  # type: ignore[arg-type]
-            raise TypeError(f"All elements of {what} must be callable.")
-        return list(pipeline_generators)  # type: ignore[return-value]
+        if isinstance(self._measures, list):
+            return self._measures
+        return self._measures.get(dataset, self._default_measures)
+
+    def measures_for(
+        self, dataset_name: str, eval_metrics: Optional[Sequence[Any]] = None
+    ) -> Sequence[Any]:
+        """
+        Decide which metrics to evaluate for one dataset.
+
+        Args:
+            dataset_name: Dataset display name.
+            eval_metrics: Explicit metrics supplied by the caller, if any.
+
+        Returns:
+            Sequence[Any]: ``eval_metrics`` when given, else the suite's configuration.
+        """
+        if eval_metrics is not None:
+            return eval_metrics
+        return self.get_measures(dataset_name)
+
+    # ------------------------------------------------------------------
+    # Pipeline coercion
+    # ------------------------------------------------------------------
+
+    def wrap_pipeline(
+        self, pipeline: Transformer, context: DatasetContext
+    ) -> Transformer:
+        """
+        Decorate a single pipeline before it is evaluated.
+
+        This is the single seam for suite-specific pipeline modifications such as
+        appending a result filter. It is applied by both sequential and grouped
+        coercion, so overriding it alone covers every execution mode.
+
+        Args:
+            pipeline: The pipeline produced by a generator.
+            context: The shared context for the corpus being evaluated.
+
+        Returns:
+            Transformer: The pipeline to evaluate. The default returns it unchanged.
+        """
+        return pipeline
 
     def coerce_pipelines_sequential(
         self,
         context: DatasetContext,
-        pipeline_generators: Union[Callable[[DatasetContext], Any], runtime_Sequence],
-    ):
+        pipeline_generators: PipelineGenerators,
+    ) -> Iterator[NamedPipeline]:
         """
         Yield pipelines lazily, one at a time, without materializing the full set.
 
@@ -473,63 +518,13 @@ class Suite(ABC, metaclass=SuiteMeta):
         Raises:
             ValueError: If a generator yields an invalid structure.
         """
-        gens = self._normalize_generators(pipeline_generators, "pipeline_generators")
-
-        def _yield_item(item):
-            if isinstance(item, tuple) and len(item) == 2:
-                p, nm = item
-            else:
-                p, nm = item, None
-
-            if isinstance(p, Transformer):
-                yield p, (nm if isinstance(nm, str) else None)
-            elif isinstance(p, runtime_Sequence) and all(
-                isinstance(pi, Transformer) for pi in p
-            ):
-                if isinstance(nm, str):
-                    for pi in p:
-                        yield pi, nm
-                elif isinstance(nm, runtime_Sequence):
-                    nm_list = list(nm)
-                    if len(nm_list) != len(p):
-                        raise ValueError(
-                            "Length of names does not match number of pipelines."
-                        )
-                    for pi, nmi in zip(p, nm_list):
-                        yield pi, (nmi if isinstance(nmi, str) else None)
-                else:
-                    for pi in p:
-                        yield pi, None
-            else:
-                raise ValueError(f"Generator yielded an invalid item: {type(p)}")
-
-        for gen in gens:
-            out = gen(context)
-            if inspect.isgenerator(out) or isinstance(out, Iterator):
-                try:
-                    for item in out:
-                        yield from _yield_item(item)
-                except RuntimeError as exc:
-                    # PEP 479 turns leaked StopIteration into RuntimeError; surface a clear message.
-                    if "StopIteration" in str(exc):
-                        raise ValueError(
-                            "Pipeline generator raised StopIteration. "
-                            "Use `return` to end a generator, or catch StopIteration "
-                            "from `next()` inside the generator."
-                        ) from exc
-                    raise
-            else:
-                if isinstance(out, tuple):
-                    _pipelines, *_rest = out
-                    _names = None if not _rest else _rest[0]
-                    yield from _yield_item((_pipelines, _names))
-                else:
-                    yield from _yield_item(out)
+        for pipeline, name in iter_generator_output(context, pipeline_generators):
+            yield self.wrap_pipeline(pipeline, context), name
 
     def coerce_pipelines_grouped(
         self,
         context: DatasetContext,
-        pipeline_generators: Union[Callable[[DatasetContext], Any], runtime_Sequence],
+        pipeline_generators: PipelineGenerators,
     ) -> Tuple[list[Transformer], Optional[list[str]]]:
         """
         Materialize all pipelines (and optional names) into lists.
@@ -550,197 +545,288 @@ class Suite(ABC, metaclass=SuiteMeta):
         Raises:
             ValueError: If the generators produce no pipelines or an invalid structure.
         """
-        gens = self._normalize_generators(pipeline_generators, "pipeline_generators")
-
         pipelines: list[Transformer] = []
         names: list[Optional[str]] = []
-
-        def _emit_item_to_lists(item):
-            if isinstance(item, tuple) and len(item) == 2:
-                p, nm = item
-            else:
-                p, nm = item, None
-
-            if isinstance(p, Transformer):
-                pipelines.append(p)
-                names.append(nm if isinstance(nm, str) else None)
-            elif isinstance(p, runtime_Sequence) and all(
-                isinstance(pi, Transformer) for pi in p
-            ):
-                if isinstance(nm, str):
-                    pipelines.extend(p)
-                    names.extend([nm] * len(p))
-                elif isinstance(nm, runtime_Sequence):
-                    nm_list = list(nm)
-                    if len(nm_list) != len(p):
-                        raise ValueError(
-                            "Length of names does not match number of pipelines."
-                        )
-                    pipelines.extend(p)
-                    names.extend([n if isinstance(n, str) else None for n in nm_list])
-                else:
-                    pipelines.extend(p)
-                    names.extend([None] * len(p))
-            else:
-                raise ValueError(f"Generator yielded an invalid item: {type(p)}")
-
-        for gen in gens:
-            out = gen(context)
-            if inspect.isgenerator(out) or isinstance(out, Iterator):
-                try:
-                    for item in out:
-                        _emit_item_to_lists(item)
-                except RuntimeError as exc:
-                    # PEP 479 turns leaked StopIteration into RuntimeError; surface a clear message.
-                    if "StopIteration" in str(exc):
-                        raise ValueError(
-                            "Pipeline generator raised StopIteration. "
-                            "Use `return` to end a generator, or catch StopIteration "
-                            "from `next()` inside the generator."
-                        ) from exc
-                    raise
-            else:
-                if isinstance(out, tuple):
-                    _pipelines, *_rest = out
-                    _names = None if not _rest else _rest[0]
-                    _emit_item_to_lists((_pipelines, _names))
-                else:
-                    _emit_item_to_lists(out)
+        for pipeline, name in self.coerce_pipelines_sequential(
+            context, pipeline_generators
+        ):
+            pipelines.append(pipeline)
+            names.append(name)
 
         if not pipelines:
             raise ValueError(
                 "No pipelines generated. Ensure your generators produce valid Transformers."
             )
 
-        final_names = (
-            None
-            if not any(names)
-            else [
-                nm if nm is not None else f"pipeline_{i}" for i, nm in enumerate(names)
-            ]
-        )
-        return pipelines, final_names
+        return pipelines, fill_names(names)
 
-    def compute_overall_mean(
+    def iter_pipeline_batches(
         self,
-        results: pd.DataFrame,
-        eval_metrics: Sequence[Any] = None,
-    ) -> pd.DataFrame:
+        context: DatasetContext,
+        pipeline_generators: PipelineGenerators,
+        grouped: bool,
+    ) -> Iterator[list[NamedPipeline]]:
         """
-        Append overall (geometric mean) rows across datasets for each system name.
+        Yield the units of work that are evaluated together.
 
-        This first aggregates per-dataset means over repeated runs, then computes the
-        geometric mean across datasets for each metric and appends rows with
-        ``dataset == "Overall"``.
+        Grouped mode yields a single batch holding every pipeline, so that
+        :func:`pyterrier.Experiment` can run significance tests across systems.
+        Sequential mode yields one single-pipeline batch at a time, so that each
+        pipeline can be released before the next is built.
 
         Args:
-            results: DataFrame with at least ``["dataset", "name"]`` and metric columns.
-            eval_metrics: Optional sequence of metrics to consider. If not provided,
-                auto-detects all numeric metric columns in the results.
-
-        Returns:
-            pandas.DataFrame: The input results with additional ``Overall`` rows appended.
-        """
-        # Idempotency check: skip if Overall rows already exist
-        if "Overall" in results["dataset"].values:
-            return results
-
-        # Auto-detect metric columns by excluding known non-metric columns
-        non_metric_cols = {"dataset", "name", "qid", "docno", "rank", "score", "query"}
-        measure_cols = [
-            col
-            for col in results.columns
-            if col not in non_metric_cols
-            and pd.api.types.is_numeric_dtype(results[col])
-        ]
-
-        if measure_cols:
-            per_ds = (
-                results.groupby(["dataset", "name"], dropna=False)[measure_cols]
-                .mean()
-                .reset_index()
-            )
-
-            gmean_rows = []
-            for name, group in per_ds.groupby("name", dropna=False):
-                row = {"dataset": "Overall", "name": name}
-                for col in measure_cols:
-                    vals = pd.to_numeric(group[col], errors="coerce").dropna().values
-                    if np.any(vals <= 0):
-                        vals = vals + 1e-12
-                    row[col] = geometric_mean(vals)
-                gmean_rows.append(row)
-
-            gmean_df = pd.DataFrame(gmean_rows)
-            results = pd.concat([results, gmean_df], ignore_index=True)
-
-        return results
-
-    @cache
-    def get_measures(self, dataset: str) -> list[Measure]:
-        """
-        Resolve the measures applicable to a given dataset name.
-
-        Args:
-            dataset: Dataset display name as used in this suite.
-
-        Returns:
-            list[Measure]: The list configured for this dataset (or the suite-wide
-                list if a single list is maintained). Falls back to defaults when the
-                dataset is unknown.
-        """
-        if isinstance(self._measures, list):
-            return self._measures
-        if dataset not in self._measures:
-            return self.__default_measures
-        return self._measures[dataset]
-
-    @property
-    def datasets(self) -> Generator[Tuple[str, pt.datasets.Dataset], None, None]:
-        """
-        Iterate over declared datasets yielding display name and PyTerrier dataset.
+            context: The shared :class:`DatasetContext` for the current corpus group.
+            pipeline_generators: Callable or sequence of callables producing pipelines.
+            grouped: Whether all pipelines must be materialized together.
 
         Yields:
-            tuple[str, pyterrier.datasets.Dataset]: Pairs of (name, dataset object).
-
-        Raises:
-            ValueError: If ``_datasets`` has an invalid type.
+            list[tuple[Transformer, Optional[str]]]: One batch of named pipelines.
         """
-        if isinstance(self._datasets, list):
-            for ds_id_or_obj in self._datasets:
-                dataset = self._get_dataset_object(ds_id_or_obj)
-                yield ds_id_or_obj, dataset
-        elif isinstance(self._datasets, dict):
-            for name, ds_id_or_obj in self._datasets.items():
-                dataset = self._get_dataset_object(ds_id_or_obj)
-                yield name, dataset
-        else:
-            raise ValueError(
-                "Suite _datasets must be a list or dict mapping names to dataset IDs."
-            )
+        if not grouped:
+            for named_pipeline in self.coerce_pipelines_sequential(
+                context, pipeline_generators
+            ):
+                yield [named_pipeline]
+            return
 
-    @staticmethod
-    def _topics_qrels(ds: pt.datasets.Dataset, query_field: Optional[str]):
+        pipelines, names = self.coerce_pipelines_grouped(context, pipeline_generators)
+        yield list(zip(pipelines, names or [None] * len(pipelines)))
+
+    # ------------------------------------------------------------------
+    # Run files
+    # ------------------------------------------------------------------
+
+    def index_dir_for(self, index_dir: str, corpus_id: str) -> str:
+        """Directory holding the shared index for one corpus."""
+        return os.path.join(index_dir, slugify(corpus_id))
+
+    def save_dir_for(self, save_dir: str, dataset_name: str) -> str:
+        """Directory holding the run files for one dataset."""
+        return os.path.join(save_dir, slugify(dataset_name))
+
+    def run_file_path(
+        self, save_dir: str, dataset_name: str, pipeline_name: str
+    ) -> str:
+        """Path of the run file for one pipeline on one dataset."""
+        return os.path.join(
+            self.save_dir_for(save_dir, dataset_name), f"{pipeline_name}.res.gz"
+        )
+
+    def has_cached_run(
+        self,
+        save_dir: str,
+        dataset_name: str,
+        pipeline_name: str,
+        save_mode: str,
+    ) -> bool:
         """
-        Fetch topics and qrels for a dataset.
+        Whether a previously written run can be replayed instead of re-run.
 
         Args:
-            ds: A :class:`pyterrier.datasets.Dataset` instance.
-            query_field: Optional topic field name (e.g., ``"title"``).
+            save_dir: Root run-file directory.
+            dataset_name: Dataset display name.
+            pipeline_name: Pipeline display name.
+            save_mode: PyTerrier save mode; ``"overwrite"`` always re-runs.
+
+        Returns:
+            bool: True when a reusable run file exists.
+        """
+        if save_mode == "overwrite":
+            return False
+        return os.path.exists(self.run_file_path(save_dir, dataset_name, pipeline_name))
+
+    def load_cached_run(self, filepath: str) -> Transformer:
+        """
+        Load a gzipped TREC run file into a transformer that replays it.
+
+        Args:
+            filepath: Path returned by :meth:`run_file_path`.
+
+        Returns:
+            Transformer: A transformer yielding the stored ranking.
+        """
+        with gzip.open(filepath, "rt") as f:
+            run = pd.read_csv(f, sep=r"\s+", header=None, names=RUN_FILE_COLUMNS)
+        run = ensure_string_ids(run[["qid", "docno", "score", "rank"]])
+        return pt.Transformer.from_df(run)
+
+    def prepare_save_dir(self, save_dir: str, dataset_name: str) -> str:
+        """Create and return the run-file directory for one dataset."""
+        path = self.save_dir_for(save_dir, dataset_name)
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    # ------------------------------------------------------------------
+    # Evaluation
+    # ------------------------------------------------------------------
+
+    def build_context(
+        self,
+        corpus_id: str,
+        corpus_ds: pt.datasets.Dataset,
+        config: RunConfig,
+    ) -> DatasetContext:
+        """
+        Build the context shared by every dataset in a corpus group.
+
+        Indexing happens once per context, so overriding this is the way to
+        inject a custom context type or a bespoke index location.
+
+        Args:
+            corpus_id: The shared corpus identifier.
+            corpus_ds: The PyTerrier dataset for that corpus.
+            config: The resolved run configuration.
+
+        Returns:
+            DatasetContext: The context handed to pipeline generators.
+        """
+        if config.index_dir is None:
+            return DatasetContext(corpus_ds)
+        path = self.index_dir_for(config.index_dir, corpus_id)
+        os.makedirs(path, exist_ok=True)
+        return DatasetContext(corpus_ds, path=path)
+
+    def prepare_topics_qrels(
+        self, dataset: pt.datasets.Dataset, dataset_name: str
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Fetch topics and qrels for one dataset, with identifier columns as strings.
+
+        Args:
+            dataset: A :class:`pyterrier.datasets.Dataset` instance.
+            dataset_name: Dataset display name.
 
         Returns:
             tuple[pandas.DataFrame, pandas.DataFrame]: ``(topics, qrels)``.
         """
-        topics = ds.get_topics(query_field)
-        qrels = ds.get_qrels()
-        topics = _ensure_string_ids(topics, ("qid",))
-        qrels = _ensure_string_ids(qrels, ("qid", "docno"))
+        topics = ensure_string_ids(dataset.get_topics(self._query_field), ("qid",))
+        qrels = ensure_string_ids(dataset.get_qrels(), ("qid", "docno"))
         return topics, qrels
 
-    @staticmethod
-    def _free_cuda():
+    def run_experiment(
+        self,
+        pipelines: Sequence[Transformer],
+        names: Sequence[Optional[str]],
+        topics: pd.DataFrame,
+        qrels: pd.DataFrame,
+        dataset_name: str,
+        config: RunConfig,
+        **experiment_kwargs: Any,
+    ) -> pd.DataFrame:
         """
-        Best-effort memory cleanup helper.
+        Evaluate pipelines against one dataset.
+
+        The single point where :func:`pyterrier.Experiment` is called; override to
+        swap the evaluation backend or inject extra arguments.
+
+        Args:
+            pipelines: Pipelines to evaluate together.
+            names: Display names aligned with ``pipelines``; ``None`` entries are labelled positionally.
+            topics: Topics frame.
+            qrels: Qrels frame.
+            dataset_name: Dataset display name, used to resolve metrics.
+            config: The resolved run configuration.
+            **experiment_kwargs: Extra arguments forwarded to the experiment.
+
+        Returns:
+            pandas.DataFrame: The raw experiment results.
+        """
+        return pt.Experiment(
+            list(pipelines),
+            eval_metrics=self.measures_for(dataset_name, config.eval_metrics),
+            topics=topics,
+            qrels=qrels,
+            names=fill_names(names),
+            **experiment_kwargs,
+        )
+
+    def evaluate_batch(
+        self,
+        batch: Sequence[NamedPipeline],
+        topics: pd.DataFrame,
+        qrels: pd.DataFrame,
+        dataset_name: str,
+        config: RunConfig,
+    ) -> Iterator[pd.DataFrame]:
+        """
+        Evaluate one batch of pipelines against one dataset.
+
+        Pipelines with a reusable run file are replayed from disk one by one; the
+        remainder are evaluated together in a single experiment so that
+        cross-system tests still see the full set.
+
+        Args:
+            batch: ``(pipeline, name)`` pairs to evaluate.
+            topics: Topics frame.
+            qrels: Qrels frame.
+            dataset_name: Dataset display name.
+            config: The resolved run configuration.
+
+        Yields:
+            pandas.DataFrame: One frame per experiment performed.
+        """
+        pending: list[NamedPipeline] = []
+
+        for pipeline, name in batch:
+            if not (
+                config.save_dir
+                and name
+                and self.has_cached_run(
+                    config.save_dir, dataset_name, name, config.save_mode
+                )
+            ):
+                pending.append((pipeline, name))
+                continue
+
+            filepath = self.run_file_path(config.save_dir, dataset_name, name)
+            logger.info(f"Loading '{name}' for {dataset_name} from {filepath}")
+            yield self.run_experiment(
+                [self.load_cached_run(filepath)],
+                [name],
+                topics,
+                qrels,
+                dataset_name,
+                config,
+            )
+
+        if not pending:
+            return
+
+        kwargs = dict(config.experiment_kwargs)
+        if config.save_dir is not None:
+            kwargs["save_dir"] = self.prepare_save_dir(config.save_dir, dataset_name)
+
+        yield self.run_experiment(
+            [pipeline for pipeline, _ in pending],
+            [name for _, name in pending],
+            topics,
+            qrels,
+            dataset_name,
+            config,
+            **kwargs,
+        )
+
+    def annotate_results(
+        self, results: pd.DataFrame, dataset_name: str, corpus_id: str
+    ) -> pd.DataFrame:
+        """
+        Tag a result frame with the dataset it came from.
+
+        Args:
+            results: Raw frame returned by :meth:`run_experiment`.
+            dataset_name: Dataset display name.
+            corpus_id: Identifier of the corpus the dataset belongs to.
+
+        Returns:
+            pandas.DataFrame: The annotated frame.
+        """
+        results["dataset"] = dataset_name
+        return results
+
+    @staticmethod
+    def release_pipelines() -> None:
+        """
+        Best-effort memory cleanup between pipeline batches.
 
         Calls ``gc.collect()`` and, if ``torch.cuda.is_available()``, empties the CUDA cache.
         Silently ignores any exceptions (CUDA and torch are optional).
@@ -756,15 +842,182 @@ class Suite(ABC, metaclass=SuiteMeta):
         except Exception:
             pass
 
-    def __call__(
+    # ------------------------------------------------------------------
+    # Results
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def metric_columns(results: pd.DataFrame) -> list[str]:
+        """
+        Numeric columns of ``results`` that hold measure values.
+
+        Override alongside :meth:`postprocess_results` when a suite reports
+        columns that should not be aggregated as metrics.
+        """
+        return _metric_columns(results)
+
+    def compute_overall_mean(self, results: pd.DataFrame) -> pd.DataFrame:
+        """
+        Append overall (geometric mean) rows across datasets for each system name.
+
+        This first aggregates per-dataset means over repeated runs, then computes the
+        geometric mean across datasets for each metric and appends rows with
+        ``dataset == "Overall"``.
+
+        Args:
+            results: DataFrame with at least ``["dataset", "name"]`` and metric columns.
+
+        Returns:
+            pandas.DataFrame: The input results with additional ``Overall`` rows appended.
+        """
+        # Idempotency check: skip if Overall rows already exist
+        if "dataset" not in results.columns or "Overall" in results["dataset"].values:
+            return results
+
+        measure_cols = self.metric_columns(results)
+        if not measure_cols:
+            return results
+
+        per_dataset = (
+            results.groupby(["dataset", "name"], dropna=False)[measure_cols]
+            .mean()
+            .reset_index()
+        )
+
+        overall_rows = []
+        for name, group in per_dataset.groupby("name", dropna=False):
+            row = {"dataset": "Overall", "name": name}
+            for col in measure_cols:
+                values = pd.to_numeric(group[col], errors="coerce").dropna().values
+                if np.any(values <= 0):
+                    values = values + 1e-12
+                row[col] = geometric_mean(values)
+            overall_rows.append(row)
+
+        return pd.concat([results, pd.DataFrame(overall_rows)], ignore_index=True)
+
+    def postprocess_results(
+        self, results: pd.DataFrame, config: RunConfig
+    ) -> pd.DataFrame:
+        """
+        Transform the concatenated results before they are returned.
+
+        Override to aggregate sub-datasets or reshape the table, then call
+        ``super().postprocess_results(...)`` to keep the ``Overall`` rows.
+
+        Args:
+            results: Concatenation of every annotated result frame.
+            config: The resolved run configuration.
+
+        Returns:
+            pandas.DataFrame: The final results table.
+        """
+        if results.empty or config.perquery or not config.compute_overall:
+            return results
+        return self.compute_overall_mean(results)
+
+    # ------------------------------------------------------------------
+    # Entry point
+    # ------------------------------------------------------------------
+
+    def resolve_config(
         self,
-        ranking_generators: Union[
-            Callable[[DatasetContext], Any], Sequence[Callable[[DatasetContext], Any]]
-        ],
-        eval_metrics: Sequence[Any] = None,
+        eval_metrics: Optional[Sequence[Any]] = None,
         subset: Optional[str] = None,
         compute_overall: bool = True,
-        **experiment_kwargs: dict[str, Any],
+        **experiment_kwargs: Any,
+    ) -> RunConfig:
+        """
+        Split raw call arguments into suite settings and experiment kwargs.
+
+        ``index_dir`` and ``save_dir`` are consumed here because the suite rewrites
+        them per corpus and per dataset respectively; everything else is forwarded
+        to :func:`pyterrier.Experiment` untouched.
+
+        Args:
+            eval_metrics: Explicit metrics overriding the suite configuration.
+            subset: Optional dataset display name to restrict evaluation to.
+            compute_overall: Whether to append geometric-mean ``Overall`` rows.
+            **experiment_kwargs: Remaining arguments, including ``index_dir`` and ``save_dir``.
+
+        Returns:
+            RunConfig: The resolved configuration for this call.
+        """
+        index_dir = experiment_kwargs.pop("index_dir", None)
+        save_dir = experiment_kwargs.pop("save_dir", None)
+        grouped = experiment_kwargs.get("baseline") is not None
+        if grouped:
+            logger.warning(
+                "Significance tests require pipelines to be grouped; this uses more memory."
+            )
+        return RunConfig(
+            eval_metrics=eval_metrics,
+            subset=subset,
+            compute_overall=compute_overall,
+            index_dir=index_dir,
+            save_dir=save_dir,
+            save_mode=experiment_kwargs.get("save_mode", "warn"),
+            perquery=experiment_kwargs.get("perquery", False),
+            grouped=grouped,
+            experiment_kwargs=experiment_kwargs,
+        )
+
+    def run(
+        self,
+        ranking_generators: PipelineGenerators,
+        config: RunConfig,
+    ) -> Iterator[pd.DataFrame]:
+        """
+        Evaluate every pipeline against every selected dataset.
+
+        Walks corpus groups, building one shared context per corpus so that
+        indexing happens once, and releases each pipeline batch once it has been
+        evaluated against all datasets sharing that corpus.
+
+        Args:
+            ranking_generators: Callable or sequence of callables producing pipelines.
+            config: The resolved run configuration.
+
+        Yields:
+            pandas.DataFrame: Annotated result frames, in evaluation order.
+        """
+        for corpus_id, corpus_ds, members in self.iter_corpus_groups():
+            selected = self.select_members(members, config.subset)
+            if not selected:
+                continue
+
+            context = self.build_context(corpus_id, corpus_ds, config)
+            try:
+                batches = self.iter_pipeline_batches(
+                    context, ranking_generators, config.grouped
+                )
+                for batch in batches:
+                    try:
+                        for key, dataset_ref in selected:
+                            dataset_name = self._display_name(key)
+                            dataset = self._get_dataset_object(dataset_ref)
+                            topics, qrels = self.prepare_topics_qrels(
+                                dataset, dataset_name
+                            )
+                            for frame in self.evaluate_batch(
+                                batch, topics, qrels, dataset_name, config
+                            ):
+                                yield self.annotate_results(
+                                    frame, dataset_name, corpus_id
+                                )
+                    finally:
+                        del batch
+                        self.release_pipelines()
+            finally:
+                del context
+
+    def __call__(
+        self,
+        ranking_generators: PipelineGenerators,
+        eval_metrics: Optional[Sequence[Any]] = None,
+        subset: Optional[str] = None,
+        compute_overall: bool = True,
+        **experiment_kwargs: Any,
     ) -> pd.DataFrame:
         """
         Run the experiment(s) for each dataset in the suite and return a results table.
@@ -778,9 +1031,10 @@ class Suite(ABC, metaclass=SuiteMeta):
             ranking_generators: Callable or sequence of callables producing pipelines
                 per :class:`DatasetContext` (same conventions as in
                 :meth:`coerce_pipelines_sequential`).
-            eval_metrics: Optional explicit metrics to evaluate; defaults to the suite’s
+            eval_metrics: Optional explicit metrics to evaluate; defaults to the suite's
                 configuration for each dataset.
             subset: Optional dataset display name to restrict evaluation to a single member.
+            compute_overall: Whether to append geometric-mean ``Overall`` rows.
             **experiment_kwargs: Additional keyword arguments forwarded to
                 :func:`pyterrier.Experiment`. If ``save_dir`` is provided, it is
                 suffixed per dataset. If ``index_dir`` is provided, it is
@@ -793,181 +1047,18 @@ class Suite(ABC, metaclass=SuiteMeta):
 
         Notes:
             This method reuses a single index per corpus group and cleans up GPU memory
-            between pipeline evaluations.
+            between pipeline evaluations. Subclasses should prefer overriding the
+            individual hooks documented on :class:`Suite` over this method.
         """
-        results: list[pd.DataFrame] = []
-
-        baseline = experiment_kwargs.get("baseline", None)
-        coerce_grouped = baseline is not None
-        if coerce_grouped:
-            logger.warning(
-                "Significance tests require pipelines to be grouped; this uses more memory."
-            )
-
-        # Extract index_dir before the corpus loop (pop so it doesn't go to pt.Experiment)
-        index_dir = experiment_kwargs.pop("index_dir", None)
-        # Get save_dir and save_mode for skip logic (don't pop - still needed later)
-        save_dir = experiment_kwargs.get("save_dir", None)
-        save_mode = experiment_kwargs.get("save_mode", "warn")
-
-        for corpus_id, corpus_ds, members in self._iter_corpus_groups():
-            # If a subset was requested, skip this corpus unless it contains the subset
-            if subset and all(name != subset for name, _ in members):
-                continue
-
-            # Single shared context per corpus (indexing happens once here)
-            if index_dir is not None:
-                formatted_corpus_id = corpus_id.replace("/", "-").lower()
-                corpus_index_dir = f"{index_dir}/{formatted_corpus_id}"
-                os.makedirs(corpus_index_dir, exist_ok=True)
-                context = DatasetContext(corpus_ds, path=corpus_index_dir)
-            else:
-                context = DatasetContext(corpus_ds)
-
-            if coerce_grouped:
-                # Materialise all pipelines ONCE for the corpus
-                pipelines, names = self.coerce_pipelines_grouped(
-                    context, ranking_generators
-                )
-                save_dir = experiment_kwargs.pop("save_dir", None)
-
-                # Evaluate the same systems across each dataset that shares this corpus
-                for ds_name, ds_id_or_obj in members:
-                    kwargs = experiment_kwargs.copy()
-                    if subset and ds_name != subset:
-                        continue
-
-                    ds_member = self._get_dataset_object(ds_id_or_obj)
-                    topics, qrels = self._topics_qrels(ds_member, self._query_field)
-
-                    if not isinstance(ds_name, str):
-                        ds_name = self._get_irds_id(ds_name)
-
-                    if save_dir is not None:
-                        formatted_ds_name = ds_name.replace("/", "-").lower()
-                        ds_save_dir = f"{save_dir}/{formatted_ds_name}"
-                        kwargs["save_dir"] = ds_save_dir
-                        os.makedirs(ds_save_dir, exist_ok=True)
-
-                    # Per-pipeline: either load from disk or run inference
-                    run_pipelines = []
-                    run_names = []
-                    for pipe, pipe_name in zip(pipelines, names):
-                        if (
-                            save_dir
-                            and pipe_name
-                            and _can_skip_dataset(save_dir, ds_name, pipe_name, save_mode)
-                        ):
-                            # Load from existing run file
-                            filepath = _get_run_file_path(save_dir, ds_name, pipe_name)
-                            logger.info(
-                                f"Loading '{pipe_name}' for {ds_name} from {filepath}"
-                            )
-                            run_df = _load_run_file(filepath)
-                            loaded_pipeline = pt.Transformer.from_df(run_df)
-                            df = pt.Experiment(
-                                [loaded_pipeline],
-                                eval_metrics=eval_metrics or self.get_measures(ds_name),
-                                topics=topics,
-                                qrels=qrels,
-                                names=[pipe_name],
-                            )
-                            df["dataset"] = ds_name
-                            results.append(df)
-                        else:
-                            # Need to run inference for this pipeline
-                            run_pipelines.append(pipe)
-                            run_names.append(pipe_name)
-
-                    # Run inference for pipelines that don't have cached results
-                    if run_pipelines:
-                        df = pt.Experiment(
-                            run_pipelines,
-                            eval_metrics=eval_metrics or self.get_measures(ds_name),
-                            topics=topics,
-                            qrels=qrels,
-                            names=run_names,
-                            **kwargs,
-                        )
-                        df["dataset"] = ds_name
-                        results.append(df)
-
-                # Release materialised pipelines after all member datasets are processed
-                try:
-                    del pipelines, names
-                finally:
-                    self._free_cuda()
-
-            else:
-                # Stream pipelines one at a time, but reuse each pipeline across ALL member datasets
-                save_dir = experiment_kwargs.pop("save_dir", None)
-                for pipeline, name in self.coerce_pipelines_sequential(
-                    context, ranking_generators
-                ):
-                    for ds_name, ds_id_or_obj in members:
-                        if subset and ds_name != subset:
-                            continue
-
-                        if not isinstance(ds_name, str):
-                            ds_name = self._get_irds_id(ds_name)
-
-                        ds_member = self._get_dataset_object(ds_id_or_obj)
-                        topics, qrels = self._topics_qrels(ds_member, self._query_field)
-
-                        # Check if we can load from existing run file for this dataset
-                        if (
-                            save_dir
-                            and name
-                            and _can_skip_dataset(save_dir, ds_name, name, save_mode)
-                        ):
-                            filepath = _get_run_file_path(save_dir, ds_name, name)
-                            logger.info(f"Loading '{name}' for {ds_name} from {filepath}")
-                            run_df = _load_run_file(filepath)
-                            loaded_pipeline = pt.Transformer.from_df(run_df)
-                            df = pt.Experiment(
-                                [loaded_pipeline],
-                                eval_metrics=eval_metrics or self.get_measures(ds_name),
-                                topics=topics,
-                                qrels=qrels,
-                                names=[name],
-                            )
-                        else:
-                            # Run inference
-                            kwargs = experiment_kwargs.copy()
-                            if save_dir is not None:
-                                formatted_ds_name = ds_name.replace("/", "-").lower()
-                                ds_save_dir = f"{save_dir}/{formatted_ds_name}"
-                                kwargs["save_dir"] = ds_save_dir
-                                os.makedirs(ds_save_dir, exist_ok=True)
-
-                            df = pt.Experiment(
-                                [pipeline],
-                                eval_metrics=eval_metrics or self.get_measures(ds_name),
-                                topics=topics,
-                                qrels=qrels,
-                                names=None if name is None else [name],
-                                **kwargs,
-                            )
-
-                        df["dataset"] = ds_name
-                        results.append(df)
-
-                    # Dispose of this pipeline (after all member datasets)
-                    try:
-                        del pipeline
-                    finally:
-                        self._free_cuda()
-
-            # Release per-corpus context
-            del context
-
-        results_df = (
-            pd.concat(results, ignore_index=True) if results else pd.DataFrame()
+        config = self.resolve_config(
+            eval_metrics=eval_metrics,
+            subset=subset,
+            compute_overall=compute_overall,
+            **experiment_kwargs,
         )
+        frames = list(self.run(ranking_generators, config))
+        results = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        return self.postprocess_results(results, config)
 
-        # Aggregate geometric mean only across actual Measure columns
-        perquery = experiment_kwargs.get("perquery", False)
-        if compute_overall and not perquery and not results_df.empty:
-            results_df = self.compute_overall_mean(results_df)
 
-        return results_df
+__all__ = ["Suite", "SuiteMeta", "RunConfig"]
