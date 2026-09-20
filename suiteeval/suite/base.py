@@ -1,18 +1,20 @@
 from __future__ import annotations
 
-from abc import ABC, ABCMeta
-from collections.abc import Iterator
 import os
-from typing import Any, Generator, Optional, Sequence, Tuple, Union
+from abc import ABC, ABCMeta
+from collections.abc import Iterator, Sequence
 from logging import getLogger
+from typing import Any
 
 import ir_datasets as irds
-from ir_measures import nDCG, Measure
 import pandas as pd
 import pyterrier as pt
+from ir_measures import Measure, nDCG
 from pyterrier import Transformer
 
 from suiteeval.context import DatasetContext
+from suiteeval.suite.config import RunConfig, ensure_string_ids, slugify
+from suiteeval.suite.config import metric_columns as _metric_columns
 from suiteeval.suite.datasets import (
     DatasetSpec,
     dataset_of,
@@ -20,30 +22,21 @@ from suiteeval.suite.datasets import (
     normalise_datasets,
     validate_dataset,
 )
-from suiteeval.suite.measures import (
-    discover_measures,
-    measures_for_dataset,
-)
+from suiteeval.suite.measures import discover_measures, measures_for_dataset
 from suiteeval.suite.measures import parse_measures as _parse_measures
-from suiteeval.suite.registration import (
-    MetadataInput,
-    dataset_map,
-    normalise_metadata,
-)
-from suiteeval.suite.config import (
-    RunConfig,
-    ensure_string_ids,
-    slugify,
-)
-from suiteeval.suite.runfiles import RUN_FILE_SUFFIX, replay_run
-from suiteeval.suite.config import metric_columns as _metric_columns
 from suiteeval.suite.pipelines import (
     NamedPipeline,
     PipelineGenerators,
     fill_names,
     iter_generator_output,
 )
+from suiteeval.suite.registration import (
+    MetadataInput,
+    dataset_map,
+    normalise_metadata,
+)
 from suiteeval.suite.results import append_overall
+from suiteeval.suite.runfiles import RUN_FILE_SUFFIX, replay_run
 
 logger = getLogger(__name__)
 
@@ -80,9 +73,9 @@ class SuiteMeta(ABCMeta):
         mcs,
         suite_name: str,
         datasets: list[str],
-        names: Optional[list[str]] = None,
+        names: list[str] | None = None,
         metadata: MetadataInput = None,
-        query_field: Optional[str] = None,
+        query_field: str | None = None,
     ) -> "Suite":
         """
         Create (or retrieve) a Suite singleton that wraps the given datasets.
@@ -152,11 +145,11 @@ class TopicsQrelsCache:
 
     def __init__(self, suite: "Suite"):
         self._suite = suite
-        self._prepared: dict[str, Tuple[pd.DataFrame, pd.DataFrame]] = {}
+        self._prepared: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
 
     def get(
         self, dataset_ref: Any, dataset_name: str
-    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         The topics and qrels for one dataset, preparing them on first use.
 
@@ -220,11 +213,11 @@ class Suite(ABC, metaclass=SuiteMeta):
         Instances are singletons per subclass (enforced by :class:`SuiteMeta`).
     """
 
-    _datasets: Union[list[str], dict[str, str]] = {}
+    _datasets: list[str] | dict[str, str] = {}
     _metadata: dict[str, Any] = {}
-    _measures: Union[list[Measure], dict[str, list[Measure]], None] = None
+    _measures: list[Measure] | dict[str, list[Measure]] | None = None
     _default_measures: list[Measure] = [nDCG @ 10]
-    _query_field: Optional[str] = None
+    _query_field: str | None = None
 
     def __init__(self):
         self._specs = normalise_datasets(self._datasets)
@@ -260,13 +253,13 @@ class Suite(ABC, metaclass=SuiteMeta):
             return name_or_obj
         return irds_id_of(name_or_obj)
 
-    def _dataset_items(self) -> list[Tuple[Any, Any]]:
+    def _dataset_items(self) -> list[tuple[Any, Any]]:
         """Normalise ``_datasets`` to a list of ``(display_key, dataset_ref)``."""
         return [spec.as_item() for spec in self._specs]
 
     def iter_corpus_groups(
         self,
-    ) -> Iterator[Tuple[str, pt.datasets.Dataset, list[Tuple[Any, Any]]]]:
+    ) -> Iterator[tuple[str, pt.datasets.Dataset, list[tuple[Any, Any]]]]:
         """
         Group the suite's datasets by the corpus they share.
 
@@ -279,7 +272,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                 ``(corpus_id, corpus_dataset, [(display_key, dataset_ref), ...])``.
         """
         corpus_datasets: dict[str, pt.datasets.Dataset] = {}
-        members: dict[str, list[Tuple[Any, Any]]] = {}
+        members: dict[str, list[tuple[Any, Any]]] = {}
 
         for spec in self._specs:
             corpus_id = self._corpus_id_for(spec)
@@ -306,8 +299,8 @@ class Suite(ABC, metaclass=SuiteMeta):
             return spec.irds_id
 
     def select_members(
-        self, members: Sequence[Tuple[Any, Any]], subset: Optional[str]
-    ) -> list[Tuple[Any, Any]]:
+        self, members: Sequence[tuple[Any, Any]], subset: str | None
+    ) -> list[tuple[Any, Any]]:
         """
         Choose which members of a corpus group to evaluate.
 
@@ -325,9 +318,12 @@ class Suite(ABC, metaclass=SuiteMeta):
         ]
 
     @property
-    def datasets(self) -> Generator[Tuple[str, pt.datasets.Dataset], None, None]:
+    def datasets(self) -> Iterator[tuple[str, pt.datasets.Dataset]]:
         """
         Iterate over declared datasets yielding display name and PyTerrier dataset.
+
+        Each access resolves the datasets afresh, so this is an iterator rather
+        than a list: take ``list(suite.datasets)`` to hold on to them.
 
         Yields:
             tuple[str, pyterrier.datasets.Dataset]: Pairs of (name, dataset object).
@@ -364,30 +360,21 @@ class Suite(ABC, metaclass=SuiteMeta):
 
     def get_measures(self, dataset: str) -> list[Measure]:
         """
-        Resolve the measures configured for a given dataset name.
+        The measures configured for one dataset.
 
-        Args:
-            dataset: Dataset display name as used in this suite.
-
-        Returns:
-            list[Measure]: The list configured for this dataset (or the suite-wide
-                list if a single list is maintained). Falls back to
-                ``_default_measures`` when the dataset is unknown.
+        ``_measures`` may be a suite-wide list or a per-dataset mapping; an
+        unknown dataset falls back to ``_default_measures``.
         """
         return measures_for_dataset(self._measures, dataset, self._default_measures)
 
     def measures_for(
-        self, dataset_name: str, eval_metrics: Optional[Sequence[Any]] = None
+        self, dataset_name: str, eval_metrics: Sequence[Any] | None = None
     ) -> Sequence[Any]:
         """
         Decide which metrics to evaluate for one dataset.
 
-        Args:
-            dataset_name: Dataset display name.
-            eval_metrics: Explicit metrics supplied by the caller, if any.
-
-        Returns:
-            Sequence[Any]: ``eval_metrics`` when given, else the suite's configuration.
+        Metrics the caller supplied win; otherwise the suite's own
+        configuration is used. Override to vary metrics per dataset.
         """
         if eval_metrics is not None:
             return eval_metrics
@@ -436,7 +423,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                 applied to all pipelines or a sequence aligned with ``pipelines``.
 
         Yields:
-            tuple[Transformer, Optional[str]]: The pipeline and an optional display name.
+            tuple[Transformer, str | None]: The pipeline and an optional display name.
 
         Raises:
             ValueError: If a generator yields an invalid structure.
@@ -448,7 +435,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         self,
         context: DatasetContext,
         pipeline_generators: PipelineGenerators,
-    ) -> Tuple[list[Transformer], Optional[list[str]]]:
+    ) -> tuple[list[Transformer], list[str] | None]:
         """
         Materialize all pipelines (and optional names) into lists.
 
@@ -461,7 +448,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                 conventions as in :meth:`coerce_pipelines_sequential`.
 
         Returns:
-            tuple[list[Transformer], Optional[list[str]]]:
+            tuple[list[Transformer], list[str] | None]:
                 A list of pipelines and, if provided, a list of corresponding names.
                 If no names were supplied, returns ``None`` for the second element.
 
@@ -469,7 +456,7 @@ class Suite(ABC, metaclass=SuiteMeta):
             ValueError: If the generators produce no pipelines or an invalid structure.
         """
         pipelines: list[Transformer] = []
-        names: list[Optional[str]] = []
+        names: list[str | None] = []
         for pipeline, name in self.coerce_pipelines_sequential(
             context, pipeline_generators
         ):
@@ -503,7 +490,7 @@ class Suite(ABC, metaclass=SuiteMeta):
             grouped: Whether all pipelines must be materialized together.
 
         Yields:
-            list[tuple[Transformer, Optional[str]]]: One batch of named pipelines.
+            list[tuple[Transformer, str | None]]: One batch of named pipelines.
         """
         if not grouped:
             for named_pipeline in self.coerce_pipelines_sequential(
@@ -546,14 +533,8 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         Whether a previously written run can be replayed instead of re-run.
 
-        Args:
-            save_dir: Root run-file directory.
-            dataset_name: Dataset display name.
-            pipeline_name: Pipeline display name.
-            save_mode: PyTerrier save mode; ``"overwrite"`` always re-runs.
-
-        Returns:
-            bool: True when a reusable run file exists.
+        A PyTerrier ``save_mode`` of ``"overwrite"`` always re-runs. Override
+        alongside :meth:`run_file_path` to change where runs are looked for.
         """
         if save_mode == "overwrite":
             return False
@@ -561,13 +542,9 @@ class Suite(ABC, metaclass=SuiteMeta):
 
     def load_cached_run(self, filepath: str) -> Transformer:
         """
-        Load a gzipped TREC run file into a transformer that replays it.
+        Load the run file at ``filepath`` into a transformer that replays it.
 
-        Args:
-            filepath: Path returned by :meth:`run_file_path`.
-
-        Returns:
-            Transformer: A transformer yielding the stored ranking.
+        See :func:`suiteeval.suite.runfiles.replay_run`.
         """
         return replay_run(filepath)
 
@@ -609,16 +586,12 @@ class Suite(ABC, metaclass=SuiteMeta):
 
     def prepare_topics_qrels(
         self, dataset: pt.datasets.Dataset, dataset_name: str
-    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Fetch topics and qrels for one dataset, with identifier columns as strings.
+        Fetch ``(topics, qrels)`` for one dataset, with identifiers as strings.
 
-        Args:
-            dataset: A :class:`pyterrier.datasets.Dataset` instance.
-            dataset_name: Dataset display name.
-
-        Returns:
-            tuple[pandas.DataFrame, pandas.DataFrame]: ``(topics, qrels)``.
+        ``_query_field`` selects the topic field. Prepared once per dataset per
+        corpus group, so an override may do real work here.
         """
         topics = ensure_string_ids(dataset.get_topics(self._query_field), ("qid",))
         qrels = ensure_string_ids(dataset.get_qrels(), ("qid", "docno"))
@@ -627,7 +600,7 @@ class Suite(ABC, metaclass=SuiteMeta):
     def run_experiment(
         self,
         pipelines: Sequence[Transformer],
-        names: Sequence[Optional[str]],
+        names: Sequence[str | None],
         topics: pd.DataFrame,
         qrels: pd.DataFrame,
         dataset_name: str,
@@ -733,13 +706,8 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         Tag a result frame with the dataset it came from.
 
-        Args:
-            results: Raw frame returned by :meth:`run_experiment`.
-            dataset_name: Dataset display name.
-            corpus_id: Identifier of the corpus the dataset belongs to.
-
-        Returns:
-            pandas.DataFrame: The annotated frame.
+        The default sets ``dataset`` and ignores ``corpus_id``; override to
+        record more about where a row came from. Modifies ``results`` in place.
         """
         results["dataset"] = dataset_name
         return results
@@ -749,14 +717,14 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         Best-effort memory cleanup between pipeline batches.
 
-        Calls ``gc.collect()`` and, if ``torch.cuda.is_available()``, empties the CUDA cache.
-        Silently ignores any exceptions (CUDA and torch are optional).
+        Collects garbage and, when torch is installed with a CUDA device,
+        empties its cache. Failures are ignored: both are optional.
         """
         import gc
 
         gc.collect()
         try:
-            import torch  # noqa: WPS433 — optional dependency
+            import torch
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -770,9 +738,6 @@ class Suite(ABC, metaclass=SuiteMeta):
         The default does nothing: the context is dropped immediately
         afterwards, and the index it points at is meant to outlive the run.
         Override to close a handle or delete a scratch index.
-
-        Args:
-            context: The context built by :meth:`build_context`.
         """
 
     # ------------------------------------------------------------------
@@ -831,8 +796,8 @@ class Suite(ABC, metaclass=SuiteMeta):
 
     def resolve_config(
         self,
-        eval_metrics: Optional[Sequence[Any]] = None,
-        subset: Optional[str] = None,
+        eval_metrics: Sequence[Any] | None = None,
+        subset: str | None = None,
         compute_overall: bool = True,
         **experiment_kwargs: Any,
     ) -> RunConfig:
@@ -902,7 +867,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         self,
         corpus_id: str,
         corpus_ds: pt.datasets.Dataset,
-        members: Sequence[Tuple[Any, Any]],
+        members: Sequence[tuple[Any, Any]],
         ranking_generators: PipelineGenerators,
         config: RunConfig,
     ) -> Iterator[pd.DataFrame]:
@@ -943,7 +908,7 @@ class Suite(ABC, metaclass=SuiteMeta):
     def run_batch(
         self,
         batch: Sequence[NamedPipeline],
-        members: Sequence[Tuple[Any, Any]],
+        members: Sequence[tuple[Any, Any]],
         topics_qrels: "TopicsQrelsCache",
         corpus_id: str,
         config: RunConfig,
@@ -972,8 +937,8 @@ class Suite(ABC, metaclass=SuiteMeta):
     def __call__(
         self,
         ranking_generators: PipelineGenerators,
-        eval_metrics: Optional[Sequence[Any]] = None,
-        subset: Optional[str] = None,
+        eval_metrics: Sequence[Any] | None = None,
+        subset: str | None = None,
         compute_overall: bool = True,
         **experiment_kwargs: Any,
     ) -> pd.DataFrame:
@@ -1019,4 +984,4 @@ class Suite(ABC, metaclass=SuiteMeta):
         return self.postprocess_results(results, config)
 
 
-__all__ = ["Suite", "SuiteMeta", "RunConfig"]
+__all__ = ["RunConfig", "Suite", "SuiteMeta", "TopicsQrelsCache"]

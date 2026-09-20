@@ -9,7 +9,7 @@ what a suite will evaluate can be worked out without constructing one.
 from __future__ import annotations
 
 from logging import getLogger
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Sequence
 
 import ir_datasets as irds
 from ir_measures import Measure, parse_measure, parse_trec_measure
@@ -19,7 +19,7 @@ logger = getLogger(__name__)
 #: Metadata key holding the measures a dataset or suite is scored on.
 OFFICIAL_MEASURES = "official_measures"
 
-MeasureLike = Union[str, Measure]
+MeasureLike = str | Measure
 
 
 def parse_measures(measures: Sequence[MeasureLike]) -> list[Measure]:
@@ -92,7 +92,7 @@ def documented_measures(dataset_id: str) -> list[MeasureLike]:
 
 def discover_measures(
     dataset_names: Sequence[str],
-    dataset_ids: Optional[dict[str, str]],
+    dataset_ids: dict[str, str] | None,
     metadata: Any,
     default: Sequence[Measure],
 ) -> list[Measure]:
@@ -119,7 +119,7 @@ def discover_measures(
     discovered: list[Measure] = []
     seen: set[str] = set()
 
-    def add(candidates: Optional[Sequence[MeasureLike]]) -> None:
+    def add(candidates: Sequence[MeasureLike] | None) -> None:
         for measure in parse_measures(candidates or []):
             if str(measure) not in seen:
                 discovered.append(measure)
@@ -149,7 +149,7 @@ def discover_measures(
 
 
 def measures_for_dataset(
-    measures: Union[list[Measure], dict[str, list[Measure]]],
+    measures: list[Measure] | dict[str, list[Measure]],
     dataset: str,
     default: Sequence[Measure],
 ) -> list[Measure]:

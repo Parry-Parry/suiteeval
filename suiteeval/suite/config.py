@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, Sequence, Tuple
+from typing import Any, Sequence
 
 import pandas as pd
 
 #: Identifier columns coerced to strings before any join or merge.
-ID_COLUMNS: Tuple[str, ...] = ("qid", "docno")
+ID_COLUMNS: tuple[str, ...] = ("qid", "docno")
 
 #: Columns of a results table that never hold measure values.
 NON_METRIC_COLUMNS = frozenset(
@@ -64,11 +64,11 @@ class RunConfig:
         experiment_kwargs: Remaining kwargs passed to :func:`pyterrier.Experiment`.
     """
 
-    eval_metrics: Optional[Sequence[Any]] = None
-    subset: Optional[str] = None
+    eval_metrics: Sequence[Any] | None = None
+    subset: str | None = None
     compute_overall: bool = True
-    index_dir: Optional[str] = None
-    save_dir: Optional[str] = None
+    index_dir: str | None = None
+    save_dir: str | None = None
     save_mode: str = "warn"
     perquery: bool = False
     grouped: bool = False

@@ -1,5 +1,5 @@
 import tempfile
-from typing import Union, List, Literal, Optional
+from typing import List, Literal
 import pyterrier as pt
 
 
@@ -11,7 +11,7 @@ class DatasetContext:
     def __init__(
         self,
         dataset: pt.datasets.Dataset,
-        path: Optional[str] = None,
+        path: str | None = None,
     ):
         """
         Args:
@@ -26,7 +26,7 @@ class DatasetContext:
         else:
             self.path = path
 
-    def text_loader(self, fields: Union[List[str], str, Literal["*"]] = "*"):
+    def text_loader(self, fields: List[str] | str | Literal["*"] = "*"):
         """
         Returns a IRDSTextLoader instance for retrieving document texts.
 

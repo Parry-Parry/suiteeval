@@ -9,15 +9,15 @@ shape-guessing lives here so the metaclass is left with class creation alone.
 from __future__ import annotations
 
 from logging import getLogger
-from typing import Any, Optional, Sequence, Union
+from typing import Any, Sequence
 
 logger = getLogger(__name__)
 
-MetadataInput = Optional[Union[list[dict[str, Any]], dict[str, Any]]]
+MetadataInput = list[dict[str, Any]] | dict[str, Any] | None
 
 
 def dataset_map(
-    datasets: Sequence[str], names: Optional[Sequence[str]] = None
+    datasets: Sequence[str], names: Sequence[str] | None = None
 ) -> dict[str, str]:
     """
     Pair display names with dataset identifiers.
