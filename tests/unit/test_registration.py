@@ -57,10 +57,11 @@ class TestNormaliseMetadata:
     def test_none_gives_an_empty_dict_per_dataset(self):
         assert normalise_metadata(None, ["a", "b"]) == {"a": {}, "b": {}}
 
-    def test_flat_metadata_applies_to_every_dataset(self):
+    def test_flat_metadata_is_kept_flat(self):
+        """Fanning it out hid keys like `description` under a dataset name."""
         flat = {"description": "text"}
 
-        assert normalise_metadata(flat, ["a", "b"]) == {"a": flat, "b": flat}
+        assert normalise_metadata(flat, ["a", "b"]) is flat
 
     def test_per_dataset_metadata_passes_through(self):
         per_dataset = {"a": {"official_measures": [nDCG @ 10]}}

@@ -242,13 +242,9 @@ def test_trec_measure_strings_are_parsed(measure_string):
     assert Suite.parse_measures([measure_string])
 
 
-@pytest.mark.xfail(
-    reason="B2: Suite.register folds metadata into a per-dataset map, so the "
-    "'description' key never reaches __doc__",
-    strict=True,
-)
 @pytest.mark.parametrize("suite_name", ["Lotte", "MSMARCODocument", "MSMARCOPassage"])
 def test_registered_suites_take_their_description_as_docstring(suite_name):
+    """B2, fixed: flat metadata stays flat, so `description` is found."""
     assert shipped_suites()[suite_name].__doc__
 
 
