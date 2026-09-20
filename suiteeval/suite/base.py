@@ -9,7 +9,7 @@ from logging import getLogger
 
 import numpy as np
 import ir_datasets as irds
-from ir_measures import nDCG, Measure, parse_measure, parse_trec_measure
+from ir_measures import nDCG, Measure
 import pandas as pd
 import pyterrier as pt
 from pyterrier import Transformer
@@ -22,6 +22,11 @@ from suiteeval.suite.datasets import (
     normalise_datasets,
     validate_dataset,
 )
+from suiteeval.suite.measures import (
+    discover_measures,
+    measures_for_dataset,
+)
+from suiteeval.suite.measures import parse_measures as _parse_measures
 from suiteeval.suite.config import (
     RUN_FILE_COLUMNS,
     RunConfig,
@@ -291,103 +296,28 @@ class Suite(ABC, metaclass=SuiteMeta):
     # Measures
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def parse_measures(measures: Sequence[Union[str, Measure]]) -> list[Measure]:
-        """
-        Convert a list of measure strings or :class:`ir_measures.Measure` objects
-        into a flat ``list[Measure]``.
-
-        Args:
-            measures: A sequence containing measure strings (e.g., ``"nDCG@10"``)
-                and/or :class:`ir_measures.Measure` instances.
-
-        Returns:
-            list[Measure]: Parsed measure objects.
-
-        Raises:
-            ValueError: If a string entry cannot be parsed by either
-                :func:`ir_measures.parse_measure` or :func:`ir_measures.parse_trec_measure`,
-                or if an entry has an invalid type.
-        """
-        out: list[Measure] = []
-        for m in measures:
-            if isinstance(m, Measure):
-                out.append(m)
-                continue
-
-            if not isinstance(m, str):
-                raise ValueError(f"Invalid measure type: {type(m)}")
-
-            candidates: list[Measure] = []
-            for parser in (parse_measure, parse_trec_measure):
-                try:
-                    parsed = parser(m)
-                except ValueError:
-                    continue
-                candidates.extend(
-                    [parsed] if isinstance(parsed, Measure) else list(parsed)
-                )
-            if not candidates:
-                raise ValueError(f"Unrecognised measure string: {m!r}")
-            out.extend(candidates)
-
-        return out
+    parse_measures = staticmethod(_parse_measures)
 
     def coerce_measures(self, metadata: dict[str, Any]) -> None:
         """
-        Populate ``self._measures`` by aggregating available sources in priority order:
+        Populate ``self._measures`` when the suite does not state them directly.
 
-        1. Global ``metadata['official_measures']`` if present.
-        2. Per-dataset ``metadata[name]['official_measures']`` if present.
-        3. IRDS documentation ``official_measures`` for each dataset (when available).
-
-        If no measures are discovered, falls back to ``_default_measures``.
+        Sources are aggregated in priority order: global metadata, then
+        per-dataset metadata, then the IRDS documentation of each dataset,
+        falling back to ``_default_measures``. See
+        :func:`suiteeval.suite.measures.discover_measures`.
 
         Args:
             metadata: The suite metadata dictionary as configured at construction time.
-
-        Returns:
-            None
         """
         if self._measures is not None:
             return
-
-        measures: list[Measure] = []
-        seen: set[str] = set()
-
-        def _add_many(items: Optional[Sequence[Union[str, Measure]]]) -> None:
-            for m in self.parse_measures(items or []):
-                if str(m) not in seen:
-                    measures.append(m)
-                    seen.add(str(m))
-
-        if isinstance(metadata, dict):
-            # (1) global metadata, then (2) per-dataset metadata
-            _add_many(metadata.get("official_measures"))
-            for spec in self._specs:
-                per_dataset = metadata.get(spec.name, {})
-                if isinstance(per_dataset, dict):
-                    _add_many(per_dataset.get("official_measures"))
-
-        # (3) ir_datasets documentation
-        if isinstance(self._dataset_ids, dict):
-            for name, ds_id in self._dataset_ids.items():
-                try:
-                    docs = getattr(irds.load(ds_id), "documentation", lambda: None)()
-                    if isinstance(docs, dict):
-                        _add_many(docs.get("official_measures"))
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to load measures from documentation for '{name}' ({ds_id}): {e}"
-                    )
-
-        if not measures:
-            logger.warning(
-                f"No measures discovered; defaulting to {self._default_measures}."
-            )
-            measures = list(self._default_measures)
-
-        self._measures = measures
+        self._measures = discover_measures(
+            [spec.name for spec in self._specs],
+            self._dataset_ids,
+            metadata,
+            self._default_measures,
+        )
 
     def get_measures(self, dataset: str) -> list[Measure]:
         """
@@ -401,9 +331,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                 list if a single list is maintained). Falls back to
                 ``_default_measures`` when the dataset is unknown.
         """
-        if isinstance(self._measures, list):
-            return self._measures
-        return self._measures.get(dataset, self._default_measures)
+        return measures_for_dataset(self._measures, dataset, self._default_measures)
 
     def measures_for(
         self, dataset_name: str, eval_metrics: Optional[Sequence[Any]] = None
