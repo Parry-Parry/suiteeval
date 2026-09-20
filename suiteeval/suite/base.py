@@ -633,6 +633,9 @@ class Suite(ABC, metaclass=SuiteMeta):
         ``baseline`` index mean what the caller meant, and what lets a
         cross-system test see every system.
 
+        ``save_dir`` reaches PyTerrier only when at least one pipeline in the
+        batch actually has to run, so a fully replayed batch writes nothing.
+
         Args:
             batch: ``(pipeline, name)`` pairs to evaluate.
             topics: Topics frame.
@@ -661,7 +664,6 @@ class Suite(ABC, metaclass=SuiteMeta):
             names.append(name)
 
         kwargs = dict(config.experiment_kwargs)
-        # Only ask PyTerrier to write run files when something was actually run.
         if any_fresh and config.save_dir is not None:
             kwargs["save_dir"] = self.prepare_save_dir(config.save_dir, dataset_name)
 

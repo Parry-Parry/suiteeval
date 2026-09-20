@@ -487,7 +487,11 @@ class TestRunFileCache:
         mock_pt_experiment,
         mock_irds_docs_parent_id,
     ):
-        """A baseline index only means anything if the batch is not split."""
+        """
+        A baseline index only means anything if the batch is not split.
+
+        One pipeline still has to run here, so run files are still written.
+        """
         path = vaswani_suite.run_file_path(temp_dir, "vaswani", "cached")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with gzip.open(path, "wt") as f:
@@ -503,7 +507,6 @@ class TestRunFileCache:
         kwargs = experiment_kwargs_for(mock_pt_experiment, 0)
         assert kwargs["names"] == ["cached", "fresh"]
         assert kwargs["baseline"] == 0
-        # One pipeline still has to run, so run files are still written.
         assert kwargs["save_dir"] == os.path.join(temp_dir, "vaswani")
 
     def test_a_fully_cached_batch_writes_nothing(
