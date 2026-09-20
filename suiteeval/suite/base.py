@@ -27,6 +27,11 @@ from suiteeval.suite.measures import (
     measures_for_dataset,
 )
 from suiteeval.suite.measures import parse_measures as _parse_measures
+from suiteeval.suite.registration import (
+    MetadataInput,
+    dataset_map,
+    normalise_metadata,
+)
 from suiteeval.suite.config import (
     RUN_FILE_COLUMNS,
     RunConfig,
@@ -55,14 +60,22 @@ class SuiteMeta(ABCMeta):
     - Provide a :meth:`register` helper to dynamically create and register suites.
     """
 
+    #: Suite classes created by :meth:`register`, by the name they were given.
     _classes: dict[str, type] = {}
-    _instances: dict[str, "Suite"] = {}
+
+    #: One instance per suite class. Keyed by the class itself, so two suites
+    #: that happen to share a name do not share an instance.
+    _instances: dict[type, "Suite"] = {}
 
     def __call__(cls, *args, **kwargs):
-        # singleton: only one instance per class
-        if cls.__name__ not in SuiteMeta._instances:
-            SuiteMeta._instances[cls.__name__] = super().__call__(*args, **kwargs)
-        return SuiteMeta._instances[cls.__name__]
+        if cls not in SuiteMeta._instances:
+            SuiteMeta._instances[cls] = super().__call__(*args, **kwargs)
+        elif args or kwargs:
+            logger.warning(
+                f"{cls.__name__} is a singleton and already exists; the "
+                "arguments given to this call are ignored."
+            )
+        return SuiteMeta._instances[cls]
 
     @classmethod
     def register(
@@ -70,7 +83,7 @@ class SuiteMeta(ABCMeta):
         suite_name: str,
         datasets: list[str],
         names: Optional[list[str]] = None,
-        metadata: Optional[Union[list[dict[str, Any]], dict[str, Any]]] = None,
+        metadata: MetadataInput = None,
         query_field: Optional[str] = None,
     ) -> "Suite":
         """
@@ -81,11 +94,8 @@ class SuiteMeta(ABCMeta):
             datasets: IRDS dataset identifiers (e.g., ``"msmarco-passage/trec-dl-2019"``).
             names: Optional display names corresponding one-to-one with ``datasets``.
                 Defaults to ``datasets`` when omitted.
-            metadata: Optional metadata. Accepted forms:
-                * ``None`` → per-dataset empty dicts
-                * ``list[dict]`` → each entry applies to the corresponding dataset in ``names``/``datasets``
-                * ``dict[str, dict]`` → explicit mapping from dataset name/ID to metadata dict
-                * ``dict[str, Any]`` where values are not dicts → treated as flat metadata applied to all
+            metadata: Optional metadata, in any shape accepted by
+                :func:`suiteeval.suite.registration.normalise_metadata`.
             query_field: Optional topic field name to use when fetching topics (e.g., ``"title"``).
 
         Returns:
@@ -94,44 +104,40 @@ class SuiteMeta(ABCMeta):
         Raises:
             ValueError: If ``metadata`` has an unsupported shape or length.
         """
-        # if already registered, return existing instance
         if suite_name in mcs._classes:
             return mcs._classes[suite_name]()
 
-        # build the dataset name → dataset_id mapping
-        ds_names = names or datasets
-        dataset_map = dict(zip(ds_names, datasets))
+        name_to_id = dataset_map(datasets, names)
+        new_cls = mcs(
+            suite_name,
+            (Suite,),
+            {
+                "_datasets": name_to_id,
+                "_metadata": normalise_metadata(metadata, list(name_to_id)),
+                "_query_field": query_field,
+            },
+        )
 
-        # normalise metadata:
-        #  • None            → empty per-dataset dicts
-        #  • list[dict]      → metadata[i] applies to ds_names[i]
-        #  • dict[str,dict]  → per-dataset mapping (keys are names or IDs)
-        #  • dict[k,v] where v is NOT a dict → flat metadata for all
-        if metadata is None:
-            metadata_map = {name: {} for name in ds_names}
-        elif isinstance(metadata, list):
-            if len(metadata) != len(ds_names):
-                raise ValueError("`metadata` list must match number of datasets")
-            metadata_map = dict(zip(ds_names, metadata))
-        elif isinstance(metadata, dict):
-            if all(not isinstance(v, dict) for v in metadata.values()):
-                metadata_map = {name: metadata for name in ds_names}
-            else:
-                metadata_map = metadata
-        else:
-            raise ValueError(f"Unsupported metadata type: {type(metadata)}")
-
-        # dynamically create subclass with mappings
-        attrs = {
-            "_datasets": dataset_map,  # display-name -> dataset_id
-            "_metadata": metadata_map,
-            "_query_field": query_field,
-        }
-        new_cls = mcs(suite_name, (Suite,), attrs)
-
-        # store class and return its singleton instance
         mcs._classes[suite_name] = new_cls
         return new_cls()
+
+    @classmethod
+    def forget(mcs, suite_name: str) -> None:
+        """
+        Drop a registered suite, so the name can be registered again.
+
+        Args:
+            suite_name: The name the suite was registered under. Unknown names
+                are ignored.
+        """
+        suite_cls = mcs._classes.pop(suite_name, None)
+        if suite_cls is not None:
+            mcs._instances.pop(suite_cls, None)
+
+    @classmethod
+    def registered(mcs) -> list[str]:
+        """The names of every suite created through :meth:`register`."""
+        return sorted(mcs._classes)
 
 
 class Suite(ABC, metaclass=SuiteMeta):
