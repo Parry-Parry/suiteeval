@@ -236,13 +236,9 @@ def test_suites_are_singletons():
     assert type(shipped_suites()["BEIR"])() is shipped_suites()["BEIR"]
 
 
-@pytest.mark.xfail(
-    reason="B1: parse_measure raises NameError, which parse_measures does not catch, "
-    "so the parse_trec_measure fallback is unreachable",
-    strict=True,
-)
 @pytest.mark.parametrize("measure_string", ["map", "ndcg_cut_10", "recip_rank"])
 def test_trec_measure_strings_are_parsed(measure_string):
+    """B1, fixed: the parse_trec_measure fallback is reachable."""
     assert Suite.parse_measures([measure_string])
 
 

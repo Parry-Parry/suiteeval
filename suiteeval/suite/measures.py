@@ -54,6 +54,10 @@ def parse_measure_string(measure: str) -> list[Measure]:
     """
     Parse one measure string, trying the ir_measures syntax then trec_eval.
 
+    Each parser rejects what it does not recognise in its own way -
+    :func:`ir_measures.parse_measure` raises ``NameError`` for a trec_eval
+    name, not ``ValueError`` - so any exception moves on to the next parser.
+
     Args:
         measure: The measure string.
 
@@ -67,7 +71,7 @@ def parse_measure_string(measure: str) -> list[Measure]:
     for parser in (parse_measure, parse_trec_measure):
         try:
             result = parser(measure)
-        except ValueError:
+        except Exception:
             continue
         return [result] if isinstance(result, Measure) else list(result)
     raise ValueError(f"Unrecognised measure string: {measure!r}")
