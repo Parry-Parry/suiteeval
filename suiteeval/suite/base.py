@@ -140,6 +140,42 @@ class SuiteMeta(ABCMeta):
         return sorted(mcs._classes)
 
 
+class TopicsQrelsCache:
+    """
+    Topics and qrels prepared once per dataset, for the life of a corpus group.
+
+    Sequential mode evaluates one pipeline at a time against every dataset
+    sharing a corpus, so without this the topics and qrels of each dataset
+    would be re-read once per pipeline rather than once per dataset.
+
+    The cached frames are handed to every batch, on the usual PyTerrier
+    assumption that a transformer does not modify its input in place.
+    """
+
+    def __init__(self, suite: "Suite"):
+        self._suite = suite
+        self._prepared: dict[str, Tuple[pd.DataFrame, pd.DataFrame]] = {}
+
+    def get(
+        self, dataset_ref: Any, dataset_name: str
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        The topics and qrels for one dataset, preparing them on first use.
+
+        Args:
+            dataset_ref: String identifier or dataset-like object.
+            dataset_name: Dataset display name.
+
+        Returns:
+            tuple[pandas.DataFrame, pandas.DataFrame]: ``(topics, qrels)``.
+        """
+        if dataset_name not in self._prepared:
+            self._prepared[dataset_name] = self._suite.prepare_topics_qrels(
+                dataset_of(dataset_ref), dataset_name
+            )
+        return self._prepared[dataset_name]
+
+
 class Suite(ABC, metaclass=SuiteMeta):
     """
     Abstract base class for a set of related evaluations across one or more datasets.
@@ -165,9 +201,11 @@ class Suite(ABC, metaclass=SuiteMeta):
     :meth:`resolve_config`          Split kwargs into a :class:`RunConfig`
     :meth:`iter_corpus_groups`      Group datasets by shared corpus
     :meth:`select_members`          Pick the datasets to evaluate in a group
+    :meth:`run_corpus_group`        Evaluate one corpus group start to finish
     :meth:`build_context`           Build the shared per-corpus context
     :meth:`iter_pipeline_batches`   Decide how pipelines are batched
     :meth:`wrap_pipeline`           Decorate each pipeline (filters, etc.)
+    :meth:`run_batch`               Take one batch across the group's datasets
     :meth:`prepare_topics_qrels`    Fetch and normalise topics/qrels
     :meth:`measures_for`            Choose metrics for a dataset
     :meth:`has_cached_run` /
@@ -175,7 +213,8 @@ class Suite(ABC, metaclass=SuiteMeta):
     :meth:`run_file_path`           Reuse run files written by a previous call
     :meth:`run_experiment`          The :func:`pyterrier.Experiment` call itself
     :meth:`annotate_results`        Tag result rows with their dataset
-    :meth:`release_pipelines`       Free memory between batches
+    :meth:`release_pipelines` /
+    :meth:`release_context`         Free memory between batches and groups
     :meth:`postprocess_results`     Aggregate the concatenated results
     ==============================  ==========================================
 
@@ -728,6 +767,18 @@ class Suite(ABC, metaclass=SuiteMeta):
         except Exception:
             pass
 
+    def release_context(self, context: DatasetContext) -> None:
+        """
+        Release a corpus context once its group has been evaluated.
+
+        The default does nothing: the context is dropped immediately
+        afterwards, and the index it points at is meant to outlive the run.
+        Override to close a handle or delete a scratch index.
+
+        Args:
+            context: The context built by :meth:`build_context`.
+        """
+
     # ------------------------------------------------------------------
     # Results
     # ------------------------------------------------------------------
@@ -871,31 +922,80 @@ class Suite(ABC, metaclass=SuiteMeta):
             selected = self.select_members(members, config.subset)
             if not selected:
                 continue
+            yield from self.run_corpus_group(
+                corpus_id, corpus_ds, selected, ranking_generators, config
+            )
 
-            context = self.build_context(corpus_id, corpus_ds, config)
-            try:
-                batches = self.iter_pipeline_batches(
-                    context, ranking_generators, config.grouped
-                )
-                for batch in batches:
-                    try:
-                        for key, dataset_ref in selected:
-                            dataset_name = self._display_name(key)
-                            dataset = self._get_dataset_object(dataset_ref)
-                            topics, qrels = self.prepare_topics_qrels(
-                                dataset, dataset_name
-                            )
-                            for frame in self.evaluate_batch(
-                                batch, topics, qrels, dataset_name, config
-                            ):
-                                yield self.annotate_results(
-                                    frame, dataset_name, corpus_id
-                                )
-                    finally:
-                        del batch
-                        self.release_pipelines()
-            finally:
-                del context
+    def run_corpus_group(
+        self,
+        corpus_id: str,
+        corpus_ds: pt.datasets.Dataset,
+        members: Sequence[Tuple[Any, Any]],
+        ranking_generators: PipelineGenerators,
+        config: RunConfig,
+    ) -> Iterator[pd.DataFrame]:
+        """
+        Evaluate every pipeline against the datasets sharing one corpus.
+
+        One context is built for the group, so indexing happens once, and each
+        batch of pipelines is released as soon as every dataset in the group
+        has been evaluated against it.
+
+        Args:
+            corpus_id: The shared corpus identifier.
+            corpus_ds: The PyTerrier dataset for that corpus.
+            members: ``(display_key, dataset_ref)`` pairs to evaluate.
+            ranking_generators: Callable or sequence of callables producing pipelines.
+            config: The resolved run configuration.
+
+        Yields:
+            pandas.DataFrame: Annotated result frames, in evaluation order.
+        """
+        context = self.build_context(corpus_id, corpus_ds, config)
+        topics_qrels = TopicsQrelsCache(self)
+        try:
+            for batch in self.iter_pipeline_batches(
+                context, ranking_generators, config.grouped
+            ):
+                try:
+                    yield from self.run_batch(
+                        batch, members, topics_qrels, corpus_id, config
+                    )
+                finally:
+                    del batch
+                    self.release_pipelines()
+        finally:
+            self.release_context(context)
+            del context
+
+    def run_batch(
+        self,
+        batch: Sequence[NamedPipeline],
+        members: Sequence[Tuple[Any, Any]],
+        topics_qrels: "TopicsQrelsCache",
+        corpus_id: str,
+        config: RunConfig,
+    ) -> Iterator[pd.DataFrame]:
+        """
+        Evaluate one batch of pipelines against every dataset in a corpus group.
+
+        Args:
+            batch: ``(pipeline, name)`` pairs to evaluate together.
+            members: ``(display_key, dataset_ref)`` pairs to evaluate against.
+            topics_qrels: Per-group cache of prepared topics and qrels.
+            corpus_id: Identifier of the corpus the datasets belong to.
+            config: The resolved run configuration.
+
+        Yields:
+            pandas.DataFrame: Annotated result frames, in evaluation order.
+        """
+        for key, dataset_ref in members:
+            dataset_name = self._display_name(key)
+            topics, qrels = topics_qrels.get(dataset_ref, dataset_name)
+            for frame in self.evaluate_batch(
+                batch, topics, qrels, dataset_name, config
+            ):
+                yield self.annotate_results(frame, dataset_name, corpus_id)
 
     def __call__(
         self,

@@ -7,6 +7,7 @@ run-file caching, and result post-processing.
 
 import gzip
 import os
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -322,6 +323,93 @@ class TestSelectMembers:
         two_corpus_suite(generator_of((DummyTransformer(), "sys")), subset="ds_b")
 
         assert mock_pt_experiment.call_count == 1
+
+
+# ---------- Run loop ----------
+
+
+class TestRunLoop:
+    """``run`` delegates a corpus group, and a group delegates each batch."""
+
+    def test_topics_and_qrels_are_prepared_once_per_dataset(
+        self,
+        vaswani_suite,
+        mock_pt_get_dataset,
+        mock_pt_experiment,
+        mock_irds_docs_parent_id,
+    ):
+        """Sequential mode used to re-read them once per pipeline."""
+        calls = []
+        original = type(vaswani_suite).prepare_topics_qrels
+
+        def counting(self, dataset, dataset_name):
+            calls.append(dataset_name)
+            return original(self, dataset, dataset_name)
+
+        type(vaswani_suite).prepare_topics_qrels = counting
+        try:
+            vaswani_suite(
+                generator_of(
+                    (DummyTransformer(), "a"),
+                    (DummyTransformer(), "b"),
+                    (DummyTransformer(), "c"),
+                )
+            )
+        finally:
+            type(vaswani_suite).prepare_topics_qrels = original
+
+        assert mock_pt_experiment.call_count == 3
+        assert calls == ["vaswani"]
+
+    def test_release_context_runs_once_per_group(
+        self,
+        two_corpus_suite,
+        mock_pt_get_dataset,
+        mock_pt_experiment,
+        mock_irds_docs_parent_id,
+    ):
+        released = []
+        type(two_corpus_suite).release_context = lambda self, context: released.append(
+            context
+        )
+        try:
+            two_corpus_suite(generator_of((DummyTransformer(), "sys")))
+        finally:
+            del type(two_corpus_suite).release_context
+
+        assert len(released) == 2
+        assert all(isinstance(context, DatasetContext) for context in released)
+
+    def test_run_batch_evaluates_every_member_of_a_group(
+        self,
+        cleanup_suite_registry,
+        mock_pt_get_dataset,
+        mock_pt_experiment,
+    ):
+        """Both datasets share a corpus, so one batch is taken across both."""
+        with patch("ir_datasets.docs_parent_id", return_value="shared"):
+            suite = Suite.register(
+                "test_one_corpus",
+                datasets=["shared/a", "shared/b"],
+                names=["ds_a", "ds_b"],
+                metadata={"official_measures": [nDCG @ 10]},
+            )
+            groups = list(suite.iter_corpus_groups())
+            seen = []
+            original = type(suite).evaluate_batch
+
+            def recording(self, batch, topics, qrels, dataset_name, config):
+                seen.append(dataset_name)
+                return original(self, batch, topics, qrels, dataset_name, config)
+
+            type(suite).evaluate_batch = recording
+            try:
+                suite(generator_of((DummyTransformer(), "sys")))
+            finally:
+                type(suite).evaluate_batch = original
+
+        assert len(groups) == 1
+        assert seen == ["ds_a", "ds_b"]
 
 
 # ---------- Measures ----------
