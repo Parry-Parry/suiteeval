@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from abc import ABC, ABCMeta
 from collections.abc import Iterator
-import gzip
 import os
 from typing import Any, Generator, Optional, Sequence, Tuple, Union
 from logging import getLogger
 
-import numpy as np
 import ir_datasets as irds
 from ir_measures import nDCG, Measure
 import pandas as pd
@@ -33,11 +31,11 @@ from suiteeval.suite.registration import (
     normalise_metadata,
 )
 from suiteeval.suite.config import (
-    RUN_FILE_COLUMNS,
     RunConfig,
     ensure_string_ids,
     slugify,
 )
+from suiteeval.suite.runfiles import RUN_FILE_SUFFIX, replay_run
 from suiteeval.suite.config import metric_columns as _metric_columns
 from suiteeval.suite.pipelines import (
     NamedPipeline,
@@ -45,7 +43,7 @@ from suiteeval.suite.pipelines import (
     fill_names,
     iter_generator_output,
 )
-from suiteeval.utility import geometric_mean
+from suiteeval.suite.results import append_overall
 
 logger = getLogger(__name__)
 
@@ -534,7 +532,8 @@ class Suite(ABC, metaclass=SuiteMeta):
     ) -> str:
         """Path of the run file for one pipeline on one dataset."""
         return os.path.join(
-            self.save_dir_for(save_dir, dataset_name), f"{pipeline_name}.res.gz"
+            self.save_dir_for(save_dir, dataset_name),
+            f"{pipeline_name}{RUN_FILE_SUFFIX}",
         )
 
     def has_cached_run(
@@ -570,10 +569,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         Returns:
             Transformer: A transformer yielding the stored ranking.
         """
-        with gzip.open(filepath, "rt") as f:
-            run = pd.read_csv(f, sep=r"\s+", header=None, names=RUN_FILE_COLUMNS)
-        run = ensure_string_ids(run[["qid", "docno", "score", "rank"]])
-        return pt.Transformer.from_df(run)
+        return replay_run(filepath)
 
     def prepare_save_dir(self, save_dir: str, dataset_name: str) -> str:
         """Create and return the run-file directory for one dataset."""
@@ -807,31 +803,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         Returns:
             pandas.DataFrame: The input results with additional ``Overall`` rows appended.
         """
-        # Idempotency check: skip if Overall rows already exist
-        if "dataset" not in results.columns or "Overall" in results["dataset"].values:
-            return results
-
-        measure_cols = self.metric_columns(results)
-        if not measure_cols:
-            return results
-
-        per_dataset = (
-            results.groupby(["dataset", "name"], dropna=False)[measure_cols]
-            .mean()
-            .reset_index()
-        )
-
-        overall_rows = []
-        for name, group in per_dataset.groupby("name", dropna=False):
-            row = {"dataset": "Overall", "name": name}
-            for col in measure_cols:
-                values = pd.to_numeric(group[col], errors="coerce").dropna().values
-                if np.any(values <= 0):
-                    values = values + 1e-12
-                row[col] = geometric_mean(values)
-            overall_rows.append(row)
-
-        return pd.concat([results, pd.DataFrame(overall_rows)], ignore_index=True)
+        return append_overall(results, self.metric_columns(results))
 
     def postprocess_results(
         self, results: pd.DataFrame, config: RunConfig
