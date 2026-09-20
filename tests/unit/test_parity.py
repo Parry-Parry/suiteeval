@@ -226,13 +226,12 @@ def test_registered_suites_take_their_description_as_docstring(suite_name):
     assert shipped_suites()[suite_name].__doc__
 
 
-@pytest.mark.xfail(
-    reason="B3: _dataset_ids is only populated by Suite.register, so measure "
-    "discovery from ir_datasets documentation is dead for class-defined suites",
-    strict=True,
-)
 def test_dataset_ids_are_populated_for_class_defined_suites():
-    assert shipped_suites()["BEIR"]._dataset_ids
+    """B3, fixed: _dataset_ids is derived from the declaration, not assigned."""
+    beir = shipped_suites()["BEIR"]
+
+    assert beir._dataset_ids["beir/arguana"] == "beir/arguana"
+    assert len(beir._dataset_ids) == 25
 
 
 @pytest.mark.xfail(

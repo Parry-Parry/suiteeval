@@ -15,6 +15,13 @@ import pyterrier as pt
 from pyterrier import Transformer
 
 from suiteeval.context import DatasetContext
+from suiteeval.suite.datasets import (
+    DatasetSpec,
+    dataset_of,
+    irds_id_of,
+    normalise_datasets,
+    validate_dataset,
+)
 from suiteeval.suite.config import (
     RUN_FILE_COLUMNS,
     RunConfig,
@@ -112,7 +119,6 @@ class SuiteMeta(ABCMeta):
         # dynamically create subclass with mappings
         attrs = {
             "_datasets": dataset_map,  # display-name -> dataset_id
-            "_dataset_ids": dataset_map,  # alias used by other methods
             "_metadata": metadata_map,
             "_query_field": query_field,
         }
@@ -131,9 +137,8 @@ class Suite(ABC, metaclass=SuiteMeta):
 
     Attributes:
         _datasets: Either a ``dict[str, str]`` mapping display name → IRDS dataset ID,
-            or a ``list[str]`` of IRDS dataset IDs.
-        _dataset_ids: Normalized mapping of display name → IRDS dataset ID
-            (filled in by registration helpers).
+            or a ``list[str]`` of IRDS dataset IDs. Values may also be dataset-like
+            objects exposing ``_irds_id``, ``get_topics`` and ``get_qrels``.
         _metadata: Optional per-dataset or global metadata.
         _measures: A list of :class:`ir_measures.Measure` or a mapping from dataset name
             to such a list. When not provided, defaults are derived from metadata or
@@ -168,101 +173,48 @@ class Suite(ABC, metaclass=SuiteMeta):
     """
 
     _datasets: Union[list[str], dict[str, str]] = {}
-    _dataset_ids: dict[str, str] = {}
     _metadata: dict[str, Any] = {}
     _measures: Union[list[Measure], dict[str, list[Measure]], None] = None
     _default_measures: list[Measure] = [nDCG @ 10]
     _query_field: Optional[str] = None
 
     def __init__(self):
+        self._specs = normalise_datasets(self._datasets)
         self.coerce_measures(self._metadata)
         if "description" in self._metadata:
             self.__doc__ = self._metadata["description"]
         self.__post_init__()
 
     def __post_init__(self):
-        assert self._datasets, (
-            "Suite must have at least one dataset defined in _datasets"
-        )
+        """Validate the declaration. Override to add suite-specific checks."""
+        normalise_datasets(self._datasets)
+        if self._measures is None:
+            raise AssertionError("Suite must have measures defined in _measures")
 
-        if not isinstance(self._datasets, (dict, list)):
-            raise AssertionError(
-                "Suite _datasets must be a dict[name->id] or a list[dataset_id]"
-            )
-
-        if isinstance(self._datasets, dict):
-            for name, ds in self._datasets.items():
-                if not isinstance(name, str):
-                    raise AssertionError(
-                        f"Suite _datasets keys must be strings, got {type(name)}"
-                    )
-                self._validate_dataset(ds, repr(name))
-        else:
-            for i, ds in enumerate(self._datasets):
-                self._validate_dataset(ds, str(i))
-
-        assert self._measures is not None, (
-            "Suite must have measures defined in _measures"
-        )
-
-    @staticmethod
-    def _validate_dataset(ds: Any, where: str) -> None:
-        """Raise unless ``ds`` is a string ID or a dataset-like object."""
-        if isinstance(ds, str):
-            return
-        if all(hasattr(ds, attr) for attr in ("_irds_id", "get_topics", "get_qrels")):
-            return
-        raise AssertionError(
-            f"Suite _datasets[{where}] must be a string ID or a dataset "
-            "object with _irds_id, get_topics, and get_qrels"
-        )
+    _validate_dataset = staticmethod(validate_dataset)
 
     # ------------------------------------------------------------------
     # Dataset resolution
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _get_irds_id(ds_id_or_obj: Any) -> str:
-        """
-        Extract the IRDS ID from either a string ID or a dataset object.
+    _get_irds_id = staticmethod(irds_id_of)
+    _get_dataset_object = staticmethod(dataset_of)
 
-        Args:
-            ds_id_or_obj: Either a string IRDS ID or an object with `_irds_id` attribute.
-
-        Returns:
-            str: The IRDS ID.
-        """
-        if isinstance(ds_id_or_obj, str):
-            return ds_id_or_obj
-        return ds_id_or_obj._irds_id
+    @property
+    def _dataset_ids(self) -> dict[str, str]:
+        """Display name → IRDS identifier, derived from the declaration."""
+        return {spec.name: spec.irds_id for spec in self._specs}
 
     @classmethod
     def _display_name(cls, name_or_obj: Any) -> str:
         """Resolve a dataset key to the string used in results and paths."""
         if isinstance(name_or_obj, str):
             return name_or_obj
-        return cls._get_irds_id(name_or_obj)
-
-    @staticmethod
-    def _get_dataset_object(ds_id_or_obj: Any) -> pt.datasets.Dataset:
-        """
-        Get a PyTerrier Dataset object from either a string ID or a dataset object.
-
-        Args:
-            ds_id_or_obj: Either a string IRDS ID or a dataset object.
-
-        Returns:
-            pt.datasets.Dataset: The dataset object.
-        """
-        if isinstance(ds_id_or_obj, str):
-            return pt.get_dataset(f"irds:{ds_id_or_obj}")
-        return ds_id_or_obj
+        return irds_id_of(name_or_obj)
 
     def _dataset_items(self) -> list[Tuple[Any, Any]]:
         """Normalise ``_datasets`` to a list of ``(display_key, dataset_ref)``."""
-        if isinstance(self._datasets, dict):
-            return list(self._datasets.items())
-        return [(ds, ds) for ds in self._datasets]
+        return [spec.as_item() for spec in self._specs]
 
     def iter_corpus_groups(
         self,
@@ -278,25 +230,32 @@ class Suite(ABC, metaclass=SuiteMeta):
             tuple[str, pyterrier.datasets.Dataset, list[tuple[Any, Any]]]:
                 ``(corpus_id, corpus_dataset, [(display_key, dataset_ref), ...])``.
         """
-        groups: dict[str, dict] = {}
-        for name, ds_id_or_obj in self._dataset_items():
-            irds_id = self._get_irds_id(ds_id_or_obj)
-            try:
-                corpus_id = irds.docs_parent_id(irds_id) or irds_id
-            except Exception:
-                corpus_id = irds_id
+        corpus_datasets: dict[str, pt.datasets.Dataset] = {}
+        members: dict[str, list[Tuple[Any, Any]]] = {}
 
-            if corpus_id not in groups:
-                corpus_ds = self._get_dataset_object(
-                    corpus_id if isinstance(corpus_id, str) else irds_id
+        for spec in self._specs:
+            corpus_id = self._corpus_id_for(spec)
+            if corpus_id not in members:
+                corpus_datasets[corpus_id] = dataset_of(
+                    corpus_id if isinstance(corpus_id, str) else spec.irds_id
                 )
-                groups[corpus_id] = {"corpus_ds": corpus_ds, "members": []}
+                members[corpus_id] = []
+            members[corpus_id].append(spec.as_item())
 
-            groups[corpus_id]["members"].append((name, ds_id_or_obj))
+        # Insertion order, so groups are visited in declaration order.
+        for corpus_id, group in members.items():
+            yield corpus_id, corpus_datasets[corpus_id], group
 
-        # deterministic iteration order (insertion order is fine here)
-        for corpus_id, group in groups.items():
-            yield corpus_id, group["corpus_ds"], group["members"]
+    @staticmethod
+    def _corpus_id_for(spec: DatasetSpec) -> str:
+        """The corpus a dataset belongs to, falling back to the dataset itself."""
+        try:
+            return irds.docs_parent_id(spec.irds_id) or spec.irds_id
+        except Exception as error:
+            logger.debug(
+                f"No parent corpus for '{spec.irds_id}'; indexing it alone: {error}"
+            )
+            return spec.irds_id
 
     def select_members(
         self, members: Sequence[Tuple[Any, Any]], subset: Optional[str]
@@ -324,16 +283,9 @@ class Suite(ABC, metaclass=SuiteMeta):
 
         Yields:
             tuple[str, pyterrier.datasets.Dataset]: Pairs of (name, dataset object).
-
-        Raises:
-            ValueError: If ``_datasets`` has an invalid type.
         """
-        if not isinstance(self._datasets, (list, dict)):
-            raise ValueError(
-                "Suite _datasets must be a list or dict mapping names to dataset IDs."
-            )
-        for name, ds_id_or_obj in self._dataset_items():
-            yield self._display_name(name), self._get_dataset_object(ds_id_or_obj)
+        for spec in self._specs:
+            yield spec.name, spec.dataset()
 
     # ------------------------------------------------------------------
     # Measures
@@ -412,8 +364,8 @@ class Suite(ABC, metaclass=SuiteMeta):
         if isinstance(metadata, dict):
             # (1) global metadata, then (2) per-dataset metadata
             _add_many(metadata.get("official_measures"))
-            for name in self._datasets:
-                per_dataset = metadata.get(name, {})
+            for spec in self._specs:
+                per_dataset = metadata.get(spec.name, {})
                 if isinstance(per_dataset, dict):
                     _add_many(per_dataset.get("official_measures"))
 
