@@ -627,9 +627,11 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         Evaluate one batch of pipelines against one dataset.
 
-        Pipelines with a reusable run file are replayed from disk one by one; the
-        remainder are evaluated together in a single experiment so that
-        cross-system tests still see the full set.
+        Every pipeline with a reusable run file is swapped for a transformer
+        that replays it, and the batch is then evaluated in a single
+        experiment. Keeping the batch whole and in order is what lets a
+        ``baseline`` index mean what the caller meant, and what lets a
+        cross-system test see every system.
 
         Args:
             batch: ``(pipeline, name)`` pairs to evaluate.
@@ -639,48 +641,62 @@ class Suite(ABC, metaclass=SuiteMeta):
             config: The resolved run configuration.
 
         Yields:
-            pandas.DataFrame: One frame per experiment performed.
+            pandas.DataFrame: The results of the experiment, if there was one.
         """
-        pending: list[NamedPipeline] = []
-
-        for pipeline, name in batch:
-            if not (
-                config.save_dir
-                and name
-                and self.has_cached_run(
-                    config.save_dir, dataset_name, name, config.save_mode
-                )
-            ):
-                pending.append((pipeline, name))
-                continue
-
-            filepath = self.run_file_path(config.save_dir, dataset_name, name)
-            logger.info(f"Loading '{name}' for {dataset_name} from {filepath}")
-            yield self.run_experiment(
-                [self.load_cached_run(filepath)],
-                [name],
-                topics,
-                qrels,
-                dataset_name,
-                config,
-            )
-
-        if not pending:
+        if not batch:
             return
 
+        pipelines: list[Transformer] = []
+        names: list[str | None] = []
+        any_fresh = False
+
+        for pipeline, name in batch:
+            filepath = self.cached_run_path(dataset_name, name, config)
+            if filepath is None:
+                any_fresh = True
+            else:
+                logger.info(f"Loading '{name}' for {dataset_name} from {filepath}")
+                pipeline = self.load_cached_run(filepath)
+            pipelines.append(pipeline)
+            names.append(name)
+
         kwargs = dict(config.experiment_kwargs)
-        if config.save_dir is not None:
+        # Only ask PyTerrier to write run files when something was actually run.
+        if any_fresh and config.save_dir is not None:
             kwargs["save_dir"] = self.prepare_save_dir(config.save_dir, dataset_name)
 
         yield self.run_experiment(
-            [pipeline for pipeline, _ in pending],
-            [name for _, name in pending],
+            pipelines,
+            names,
             topics,
             qrels,
             dataset_name,
             config,
             **kwargs,
         )
+
+    def cached_run_path(
+        self, dataset_name: str, pipeline_name: str | None, config: RunConfig
+    ) -> str | None:
+        """
+        The run file to replay for one pipeline, or ``None`` to run it.
+
+        Args:
+            dataset_name: Dataset display name.
+            pipeline_name: Pipeline display name; an unnamed pipeline has no
+                run file to look for.
+            config: The resolved run configuration.
+
+        Returns:
+            str | None: Path of a reusable run file, if there is one.
+        """
+        if not (config.save_dir and pipeline_name):
+            return None
+        if not self.has_cached_run(
+            config.save_dir, dataset_name, pipeline_name, config.save_mode
+        ):
+            return None
+        return self.run_file_path(config.save_dir, dataset_name, pipeline_name)
 
     def annotate_results(
         self, results: pd.DataFrame, dataset_name: str, corpus_id: str

@@ -256,11 +256,6 @@ def test_dataset_ids_are_populated_for_class_defined_suites():
     assert len(beir._dataset_ids) == 25
 
 
-@pytest.mark.xfail(
-    reason="B4: replayed runs are evaluated without config.experiment_kwargs, so "
-    "they silently lose perquery, baseline and friends",
-    strict=True,
-)
 def test_cached_replay_keeps_experiment_kwargs(
     cleanup_suite_registry,
     temp_dir,
