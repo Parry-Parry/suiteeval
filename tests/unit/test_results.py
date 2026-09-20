@@ -52,6 +52,15 @@ class TestOverallValue:
         assert value > 0.0
         assert value == pytest.approx((1e-12 * 0.5) ** 0.5, rel=1e-6)
 
+    def test_only_the_offending_values_are_floored(self):
+        """The rest are left exact, rather than every value being shifted."""
+        floored = overall_value(pd.Series([0.0, 4.0, 9.0]))
+
+        assert floored == pytest.approx((1e-12 * 4.0 * 9.0) ** (1 / 3))
+
+    def test_positive_values_are_untouched_by_the_floor(self):
+        assert overall_value(pd.Series([4.0, 9.0])) == pytest.approx(6.0)
+
     def test_negative_values_are_reported(self, caplog):
         import logging
 

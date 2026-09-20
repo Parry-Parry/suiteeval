@@ -36,7 +36,7 @@ def read_run(filepath: str) -> pd.DataFrame:
     """
     with gzip.open(filepath, "rt") as handle:
         run = pd.read_csv(handle, sep=r"\s+", header=None, names=RUN_FILE_COLUMNS)
-    return ensure_string_ids(run[RESULT_COLUMNS].copy())
+    return ensure_string_ids(run[RESULT_COLUMNS])
 
 
 def replay_run(filepath: str) -> Transformer:

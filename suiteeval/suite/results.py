@@ -22,8 +22,8 @@ OVERALL = "Overall"
 
 EPSILON = 1e-12
 """
-Added to every value of a metric before taking its geometric mean, when any of them is
-zero or negative and would otherwise collapse or invalidate it.
+Floor applied to a metric value before taking its geometric mean, so a zero does
+not collapse the product and a negative does not invalidate the root.
 """
 
 
@@ -57,8 +57,8 @@ def overall_value(values: pd.Series) -> float:
     The geometric mean of one metric across datasets.
 
     Non-numeric and missing entries are dropped. A zero would collapse the
-    product and a negative would invalidate the root, so every value is shifted
-    by :data:`EPSILON` when either appears.
+    product and a negative would invalidate the root, so values are floored at
+    :data:`EPSILON` - only the offending ones, leaving the rest exact.
 
     Args:
         values: The per-dataset values of one metric for one system.
@@ -69,12 +69,10 @@ def overall_value(values: pd.Series) -> float:
     numeric = pd.to_numeric(values, errors="coerce").dropna().values
     if np.any(numeric < 0):
         logger.warning(
-            "Negative metric values in an Overall row; its geometric mean is "
-            "not meaningful."
+            "Negative metric values in an Overall row; they are floored, and "
+            "the geometric mean of a signed metric is not meaningful anyway."
         )
-    if np.any(numeric <= 0):
-        numeric = numeric + EPSILON
-    return geometric_mean(numeric)
+    return geometric_mean(np.maximum(numeric, EPSILON))
 
 
 def append_overall(
