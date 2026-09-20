@@ -16,8 +16,8 @@ from ir_measures import Measure, parse_measure, parse_trec_measure
 
 logger = getLogger(__name__)
 
-#: Metadata key holding the measures a dataset or suite is scored on.
 OFFICIAL_MEASURES = "official_measures"
+"""Metadata key holding the measures a dataset or suite is scored on."""
 
 MeasureLike = str | Measure
 

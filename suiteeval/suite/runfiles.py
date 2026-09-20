@@ -16,11 +16,11 @@ from pyterrier import Transformer
 
 from suiteeval.suite.config import RUN_FILE_COLUMNS, ensure_string_ids
 
-#: Extension of a run file written by a suite.
 RUN_FILE_SUFFIX = ".res.gz"
+"""Extension of a run file written by a suite."""
 
-#: Columns of a run file that a result frame needs.
 RESULT_COLUMNS = ["qid", "docno", "score", "rank"]
+"""Columns of a run file that a result frame needs."""
 
 
 def read_run(filepath: str) -> pd.DataFrame:

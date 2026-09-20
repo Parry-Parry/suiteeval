@@ -110,12 +110,16 @@ def iter_named_pipelines(item: Any) -> Iterator[NamedPipeline]:
 
 
 def _drain(output: Any) -> Iterator[NamedPipeline]:
-    """Flatten a lazy generator, reporting a leaked ``StopIteration`` clearly."""
+    """
+    Flatten a lazy generator, reporting a leaked ``StopIteration`` clearly.
+
+    PEP 479 turns a ``StopIteration`` that escapes a generator body into a
+    ``RuntimeError``, which says nothing about the generator that caused it.
+    """
     try:
         for item in output:
             yield from iter_named_pipelines(item)
     except RuntimeError as exc:
-        # PEP 479 turns leaked StopIteration into RuntimeError; surface a clear message.
         if "StopIteration" not in str(exc):
             raise
         raise ValueError(

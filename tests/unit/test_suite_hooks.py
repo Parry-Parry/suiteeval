@@ -19,9 +19,6 @@ from suiteeval.suite.base import RunConfig, Suite
 from tests.unit.conftest import DummyTransformer
 
 
-# ---------- Helpers ----------
-
-
 class Tag(Transformer):
     """Transformer that records its own label, used to trace pipeline wrapping."""
 
@@ -56,9 +53,6 @@ def two_corpus_suite(cleanup_suite_registry):
         names=["ds_a", "ds_b"],
         metadata={"official_measures": [nDCG @ 10]},
     )
-
-
-# ---------- Regression: save_dir must survive every corpus group ----------
 
 
 class TestSaveDirAcrossCorpora:
@@ -131,9 +125,6 @@ class TestSaveDirAcrossCorpora:
         assert os.path.isdir(os.path.join(index_path, "corpus-b-test"))
 
 
-# ---------- resolve_config ----------
-
-
 class TestResolveConfig:
     """``resolve_config`` splits suite settings from experiment kwargs."""
 
@@ -147,11 +138,11 @@ class TestResolveConfig:
         assert config.experiment_kwargs == {"verbose": True}
 
     def test_forwards_but_also_reads_shared_arguments(self, vaswani_suite):
+        """The suite reads these, and pt.Experiment still receives them."""
         config = vaswani_suite.resolve_config(save_mode="overwrite", perquery=True)
 
         assert config.save_mode == "overwrite"
         assert config.perquery is True
-        # Both remain available to pt.Experiment.
         assert config.experiment_kwargs == {
             "save_mode": "overwrite",
             "perquery": True,
@@ -166,9 +157,6 @@ class TestResolveConfig:
 
         assert config == RunConfig(experiment_kwargs={})
         assert config.compute_overall is True
-
-
-# ---------- Pipeline batching and coercion ----------
 
 
 class TestPipelineBatching:
@@ -296,9 +284,6 @@ class TestWrapPipeline:
         assert pipelines[0].label == "wrapped:a"
 
 
-# ---------- Dataset selection ----------
-
-
 class TestSelectMembers:
     def test_returns_all_members_without_subset(self, vaswani_suite):
         members = [("a", "ds/a"), ("b", "ds/b")]
@@ -323,9 +308,6 @@ class TestSelectMembers:
         two_corpus_suite(generator_of((DummyTransformer(), "sys")), subset="ds_b")
 
         assert mock_pt_experiment.call_count == 1
-
-
-# ---------- Run loop ----------
 
 
 class TestRunLoop:
@@ -412,9 +394,6 @@ class TestRunLoop:
         assert seen == ["ds_a", "ds_b"]
 
 
-# ---------- Measures ----------
-
-
 class TestMeasures:
     def test_explicit_metrics_win(self, vaswani_suite):
         assert vaswani_suite.measures_for("vaswani", [AP]) == [AP]
@@ -444,9 +423,6 @@ class TestMeasures:
 
         with pytest.raises(ValueError, match="Invalid measure type"):
             vaswani_suite.parse_measures([object()])
-
-
-# ---------- Run-file caching ----------
 
 
 class TestRunFileCache:
@@ -487,6 +463,7 @@ class TestRunFileCache:
         mock_pt_experiment,
         mock_irds_docs_parent_id,
     ):
+        """Both datasets replay from disk, so no experiment writes a run file."""
         save_path = os.path.join(temp_dir, "runs")
         for ds_name in ("ds_a", "ds_b"):
             path = two_corpus_suite.run_file_path(save_path, ds_name, "sys")
@@ -496,7 +473,6 @@ class TestRunFileCache:
 
         two_corpus_suite(generator_of((DummyTransformer(), "sys")), save_dir=save_path)
 
-        # Both datasets replayed from disk: no experiment writes a run file.
         assert mock_pt_experiment.call_count == 2
         assert all(
             "save_dir" not in experiment_kwargs_for(mock_pt_experiment, i)
@@ -520,9 +496,6 @@ class TestRunFileCache:
             f.write("1 Q0 d1 0 1.0 sys\n")
 
         assert suite.has_cached_run(temp_dir, "ds", "sys", "warn") is True
-
-
-# ---------- Results ----------
 
 
 class TestResultHooks:

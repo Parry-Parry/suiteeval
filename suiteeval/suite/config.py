@@ -7,16 +7,16 @@ from typing import Any, Sequence
 
 import pandas as pd
 
-#: Identifier columns coerced to strings before any join or merge.
 ID_COLUMNS: tuple[str, ...] = ("qid", "docno")
+"""Identifier columns coerced to strings before any join or merge."""
 
-#: Columns of a results table that never hold measure values.
 NON_METRIC_COLUMNS = frozenset(
     {"dataset", "name", "qid", "docno", "rank", "score", "query"}
 )
+"""Columns of a results table that never hold measure values."""
 
-#: Column order of a TREC run file.
 RUN_FILE_COLUMNS = ["qid", "iter", "docno", "rank", "score", "name"]
+"""Column order of a TREC run file."""
 
 
 def slugify(identifier: str) -> str:

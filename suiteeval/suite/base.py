@@ -51,12 +51,14 @@ class SuiteMeta(ABCMeta):
     - Provide a :meth:`register` helper to dynamically create and register suites.
     """
 
-    #: Suite classes created by :meth:`register`, by the name they were given.
     _classes: dict[str, type] = {}
+    """Suite classes created by :meth:`register`, by the name they were given."""
 
-    #: One instance per suite class. Keyed by the class itself, so two suites
-    #: that happen to share a name do not share an instance.
     _instances: dict[type, "Suite"] = {}
+    """
+    One instance per suite class. Keyed by the class itself, so two suites that happen
+    to share a name do not share an instance.
+    """
 
     def __call__(cls, *args, **kwargs):
         if cls not in SuiteMeta._instances:
@@ -234,10 +236,6 @@ class Suite(ABC, metaclass=SuiteMeta):
 
     _validate_dataset = staticmethod(validate_dataset)
 
-    # ------------------------------------------------------------------
-    # Dataset resolution
-    # ------------------------------------------------------------------
-
     _get_irds_id = staticmethod(irds_id_of)
     _get_dataset_object = staticmethod(dataset_of)
 
@@ -264,7 +262,8 @@ class Suite(ABC, metaclass=SuiteMeta):
         Group the suite's datasets by the corpus they share.
 
         Membership is decided by :func:`ir_datasets.docs_parent_id`, so datasets
-        built on the same document collection are indexed once. Override to
+        built on the same document collection are indexed once. Groups are
+        yielded in the order their first dataset was declared. Override to
         impose a different grouping.
 
         Yields:
@@ -283,7 +282,6 @@ class Suite(ABC, metaclass=SuiteMeta):
                 members[corpus_id] = []
             members[corpus_id].append(spec.as_item())
 
-        # Insertion order, so groups are visited in declaration order.
         for corpus_id, group in members.items():
             yield corpus_id, corpus_datasets[corpus_id], group
 
@@ -331,10 +329,6 @@ class Suite(ABC, metaclass=SuiteMeta):
         for spec in self._specs:
             yield spec.name, spec.dataset()
 
-    # ------------------------------------------------------------------
-    # Measures
-    # ------------------------------------------------------------------
-
     parse_measures = staticmethod(_parse_measures)
 
     def coerce_measures(self, metadata: dict[str, Any]) -> None:
@@ -379,10 +373,6 @@ class Suite(ABC, metaclass=SuiteMeta):
         if eval_metrics is not None:
             return eval_metrics
         return self.get_measures(dataset_name)
-
-    # ------------------------------------------------------------------
-    # Pipeline coercion
-    # ------------------------------------------------------------------
 
     def wrap_pipeline(
         self, pipeline: Transformer, context: DatasetContext
@@ -502,10 +492,6 @@ class Suite(ABC, metaclass=SuiteMeta):
         pipelines, names = self.coerce_pipelines_grouped(context, pipeline_generators)
         yield list(zip(pipelines, names or [None] * len(pipelines)))
 
-    # ------------------------------------------------------------------
-    # Run files
-    # ------------------------------------------------------------------
-
     def index_dir_for(self, index_dir: str, corpus_id: str) -> str:
         """Directory holding the shared index for one corpus."""
         return os.path.join(index_dir, slugify(corpus_id))
@@ -553,10 +539,6 @@ class Suite(ABC, metaclass=SuiteMeta):
         path = self.save_dir_for(save_dir, dataset_name)
         os.makedirs(path, exist_ok=True)
         return path
-
-    # ------------------------------------------------------------------
-    # Evaluation
-    # ------------------------------------------------------------------
 
     def build_context(
         self,
@@ -740,10 +722,6 @@ class Suite(ABC, metaclass=SuiteMeta):
         Override to close a handle or delete a scratch index.
         """
 
-    # ------------------------------------------------------------------
-    # Results
-    # ------------------------------------------------------------------
-
     @staticmethod
     def metric_columns(results: pd.DataFrame) -> list[str]:
         """
@@ -789,10 +767,6 @@ class Suite(ABC, metaclass=SuiteMeta):
         if results.empty or config.perquery or not config.compute_overall:
             return results
         return self.compute_overall_mean(results)
-
-    # ------------------------------------------------------------------
-    # Entry point
-    # ------------------------------------------------------------------
 
     def resolve_config(
         self,

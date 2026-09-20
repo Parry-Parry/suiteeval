@@ -14,8 +14,8 @@ from typing import Any
 
 import pyterrier as pt
 
-#: Attributes an object must expose to stand in for an IRDS identifier.
 DATASET_ATTRIBUTES = ("_irds_id", "get_topics", "get_qrels")
+"""Attributes an object must expose to stand in for an IRDS identifier."""
 
 
 def is_dataset_like(value: Any) -> bool:

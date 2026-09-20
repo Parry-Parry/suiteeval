@@ -17,12 +17,14 @@ from suiteeval.utility import geometric_mean
 
 logger = getLogger(__name__)
 
-#: Value of the ``dataset`` column on a summary row.
 OVERALL = "Overall"
+"""Value of the ``dataset`` column on a summary row."""
 
-#: Added to every value of a metric before taking its geometric mean, when any
-#: of them is zero or negative and would otherwise collapse or invalidate it.
 EPSILON = 1e-12
+"""
+Added to every value of a metric before taking its geometric mean, when any of them is
+zero or negative and would otherwise collapse or invalidate it.
+"""
 
 
 def has_overall(results: pd.DataFrame) -> bool:

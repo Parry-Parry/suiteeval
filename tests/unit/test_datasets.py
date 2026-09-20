@@ -14,15 +14,20 @@ from suiteeval.suite.datasets import (
 
 
 class FakeDataset:
-    """Minimal stand-in for a PyTerrier dataset."""
+    """
+    Minimal stand-in for a PyTerrier dataset.
+
+    Only needs the attributes ``is_dataset_like`` looks for; nothing here
+    fetches anything, and nothing calls these methods.
+    """
 
     def __init__(self, irds_id: str):
         self._irds_id = irds_id
 
-    def get_topics(self, *args, **kwargs):  # pragma: no cover - never called
+    def get_topics(self, *args, **kwargs):
         raise NotImplementedError
 
-    def get_qrels(self, *args, **kwargs):  # pragma: no cover - never called
+    def get_qrels(self, *args, **kwargs):
         raise NotImplementedError
 
 

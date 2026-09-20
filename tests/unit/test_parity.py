@@ -18,20 +18,20 @@ from ir_measures import Measure, nDCG
 from suiteeval.suite.base import Suite
 
 
-# ---------- Public surface ----------
-
-#: Every attribute a subclass may override or a caller may reach for. Adding to
-#: this list is a feature; removing from it is a breaking change.
-SUITE_SURFACE = frozenset(
+DECLARATION_ATTRIBUTES = frozenset(
     {
-        # declaration attributes
         "_datasets",
         "_dataset_ids",
         "_metadata",
         "_measures",
         "_default_measures",
         "_query_field",
-        # dataset resolution
+    }
+)
+"""Attributes a suite is declared with."""
+
+DATASET_HOOKS = frozenset(
+    {
         "_dataset_items",
         "_display_name",
         "_get_dataset_object",
@@ -40,39 +40,71 @@ SUITE_SURFACE = frozenset(
         "datasets",
         "iter_corpus_groups",
         "select_members",
-        # measures
-        "coerce_measures",
-        "get_measures",
-        "measures_for",
-        "parse_measures",
-        # pipelines
+    }
+)
+"""Hooks resolving the declaration into datasets to evaluate."""
+
+MEASURE_HOOKS = frozenset(
+    {"coerce_measures", "get_measures", "measures_for", "parse_measures"}
+)
+"""Hooks choosing what a dataset is scored on."""
+
+PIPELINE_HOOKS = frozenset(
+    {
         "coerce_pipelines_grouped",
         "coerce_pipelines_sequential",
         "iter_pipeline_batches",
         "wrap_pipeline",
-        # run files
+    }
+)
+"""Hooks turning generators into the pipelines an experiment sees."""
+
+RUN_FILE_HOOKS = frozenset(
+    {
         "has_cached_run",
         "index_dir_for",
         "load_cached_run",
         "prepare_save_dir",
         "run_file_path",
         "save_dir_for",
-        # evaluation
+    }
+)
+"""Hooks deciding where runs and indexes live, and what may be replayed."""
+
+EVALUATION_HOOKS = frozenset(
+    {
         "annotate_results",
         "build_context",
         "evaluate_batch",
         "prepare_topics_qrels",
         "release_pipelines",
         "run_experiment",
-        # results
-        "compute_overall_mean",
-        "metric_columns",
-        "postprocess_results",
-        # entry point
-        "resolve_config",
-        "run",
     }
 )
+"""Hooks performing the evaluation itself."""
+
+RESULT_HOOKS = frozenset(
+    {"compute_overall_mean", "metric_columns", "postprocess_results"}
+)
+"""Hooks shaping the results table that is returned."""
+
+ENTRY_POINT_HOOKS = frozenset({"resolve_config", "run"})
+"""Hooks of the entry point itself."""
+
+SUITE_SURFACE = (
+    DECLARATION_ATTRIBUTES
+    | DATASET_HOOKS
+    | MEASURE_HOOKS
+    | PIPELINE_HOOKS
+    | RUN_FILE_HOOKS
+    | EVALUATION_HOOKS
+    | RESULT_HOOKS
+    | ENTRY_POINT_HOOKS
+)
+"""
+Every attribute a subclass may override or a caller may reach for. Adding to this set is
+a feature; removing from it is a breaking change.
+"""
 
 
 def test_public_surface_is_unchanged():
@@ -118,9 +150,6 @@ def test_hook_signatures_are_unchanged(hook, parameters):
     assert list(signature.parameters) == parameters
 
 
-# ---------- Shipped suites ----------
-
-
 def shipped_suites():
     """Import the shipped suites lazily so a collection error is attributable."""
     from suiteeval.suite import (
@@ -142,11 +171,6 @@ def shipped_suites():
     }
 
 
-#: ``(dataset count, first dataset name, query field)`` per shipped suite.
-#:
-#: Read from ``_datasets`` rather than the ``datasets`` property: not every
-#: collection is registered with the installed ir_datasets, and this pins the
-#: declaration, not the local provider.
 SHIPPED_EXPECTATIONS = {
     "BEIR": (25, "beir/arguana", "text"),
     "BRIGHT": (12, "bright/aops", "text"),
@@ -155,10 +179,14 @@ SHIPPED_EXPECTATIONS = {
     "MSMARCOPassage": (3, "msmarco-passage/trec-dl-2019/judged", None),
     "NanoBEIR": (13, "nano-beir/arguana", "text"),
 }
+"""
+``(dataset count, first dataset name, query field)`` per shipped suite.
 
-#: Measures each shipped suite resolves after construction. Registered suites
-#: pick up extra measures from the ir_datasets documentation; that is current
-#: behaviour and is pinned here deliberately.
+Read from ``_datasets`` rather than the ``datasets`` property: not every
+collection is registered with the installed ir_datasets, and this pins the
+declaration, not the local provider.
+"""
+
 SHIPPED_MEASURES = {
     "BEIR": "[nDCG@10]",
     "BRIGHT": "[nDCG@10]",
@@ -167,6 +195,11 @@ SHIPPED_MEASURES = {
     "MSMARCODocument": "[nDCG@10, RR, AP]",
     "MSMARCOPassage": "[nDCG@10, RR(rel=2), AP(rel=2)]",
 }
+"""
+Measures each shipped suite resolves after construction. Registered suites pick up extra
+measures from the ir_datasets documentation; that is current behaviour and is pinned
+here deliberately.
+"""
 
 
 @pytest.mark.parametrize("suite_name", sorted(SHIPPED_EXPECTATIONS))
@@ -201,9 +234,6 @@ def test_shipped_suite_measure_values_are_unchanged(suite_name):
 def test_suites_are_singletons():
     assert shipped_suites()["BEIR"] is shipped_suites()["BEIR"]
     assert type(shipped_suites()["BEIR"])() is shipped_suites()["BEIR"]
-
-
-# ---------- Characterised defects ----------
 
 
 @pytest.mark.xfail(
