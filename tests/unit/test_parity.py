@@ -236,23 +236,15 @@ def test_suites_are_singletons():
     assert type(shipped_suites()["BEIR"])() is shipped_suites()["BEIR"]
 
 
-@pytest.mark.xfail(
-    reason="B1: parse_measure raises NameError, which parse_measures does not catch, "
-    "so the parse_trec_measure fallback is unreachable",
-    strict=True,
-)
 @pytest.mark.parametrize("measure_string", ["map", "ndcg_cut_10", "recip_rank"])
 def test_trec_measure_strings_are_parsed(measure_string):
+    """B1, fixed: the parse_trec_measure fallback is reachable."""
     assert Suite.parse_measures([measure_string])
 
 
-@pytest.mark.xfail(
-    reason="B2: Suite.register folds metadata into a per-dataset map, so the "
-    "'description' key never reaches __doc__",
-    strict=True,
-)
 @pytest.mark.parametrize("suite_name", ["Lotte", "MSMARCODocument", "MSMARCOPassage"])
 def test_registered_suites_take_their_description_as_docstring(suite_name):
+    """B2, fixed: flat metadata stays flat, so `description` is found."""
     assert shipped_suites()[suite_name].__doc__
 
 
@@ -264,11 +256,6 @@ def test_dataset_ids_are_populated_for_class_defined_suites():
     assert len(beir._dataset_ids) == 25
 
 
-@pytest.mark.xfail(
-    reason="B4: replayed runs are evaluated without config.experiment_kwargs, so "
-    "they silently lose perquery, baseline and friends",
-    strict=True,
-)
 def test_cached_replay_keeps_experiment_kwargs(
     cleanup_suite_registry,
     temp_dir,

@@ -63,21 +63,27 @@ def is_per_dataset(metadata: dict[str, Any]) -> bool:
 
 def normalise_metadata(metadata: MetadataInput, names: Sequence[str]) -> dict[str, Any]:
     """
-    Resolve any accepted metadata shape into a per-dataset mapping.
+    Resolve any accepted metadata shape into the ``_metadata`` a suite reads.
 
     Accepted shapes:
 
     * ``None`` → an empty dict per dataset.
     * ``list[dict]`` → entry *i* applies to ``names[i]``.
-    * ``dict[str, dict]`` → already a per-dataset mapping.
-    * ``dict[str, Any]`` with no dict values → flat metadata, applied to all.
+    * ``dict[str, dict]`` → already a per-dataset mapping, kept as it is.
+    * ``dict[str, Any]`` with no dict values → flat metadata, kept as it is.
+
+    Flat metadata is deliberately *not* fanned out across the datasets: a
+    class-defined suite writes that same flat dict straight into ``_metadata``,
+    and both routes should produce a suite that behaves identically. Fanning it
+    out moved keys like ``description`` under a dataset name, where nothing
+    looked for them.
 
     Args:
         metadata: The metadata as supplied to ``register``.
         names: Display names of the suite's datasets.
 
     Returns:
-        dict[str, Any]: The per-dataset mapping.
+        dict[str, Any]: The metadata to store on the suite.
 
     Raises:
         ValueError: If the shape is unsupported, or a list does not match the
@@ -93,7 +99,7 @@ def normalise_metadata(metadata: MetadataInput, names: Sequence[str]) -> dict[st
 
     if isinstance(metadata, dict):
         if not is_per_dataset(metadata):
-            return {name: metadata for name in names}
+            return metadata
         unknown = [key for key in metadata if key not in set(names)]
         if unknown:
             logger.warning(

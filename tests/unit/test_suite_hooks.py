@@ -479,6 +479,58 @@ class TestRunFileCache:
             for i in range(2)
         )
 
+    def test_mixed_batch_stays_one_experiment_in_order(
+        self,
+        vaswani_suite,
+        temp_dir,
+        mock_pt_get_dataset,
+        mock_pt_experiment,
+        mock_irds_docs_parent_id,
+    ):
+        """
+        A baseline index only means anything if the batch is not split.
+
+        One pipeline still has to run here, so run files are still written.
+        """
+        path = vaswani_suite.run_file_path(temp_dir, "vaswani", "cached")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with gzip.open(path, "wt") as f:
+            f.write("1 Q0 d1 0 1.0 cached\n")
+
+        vaswani_suite(
+            generator_of((DummyTransformer(), "cached"), (DummyTransformer(), "fresh")),
+            save_dir=temp_dir,
+            baseline=0,
+        )
+
+        assert mock_pt_experiment.call_count == 1
+        kwargs = experiment_kwargs_for(mock_pt_experiment, 0)
+        assert kwargs["names"] == ["cached", "fresh"]
+        assert kwargs["baseline"] == 0
+        assert kwargs["save_dir"] == os.path.join(temp_dir, "vaswani")
+
+    def test_a_fully_cached_batch_writes_nothing(
+        self,
+        vaswani_suite,
+        temp_dir,
+        mock_pt_get_dataset,
+        mock_pt_experiment,
+        mock_irds_docs_parent_id,
+    ):
+        path = vaswani_suite.run_file_path(temp_dir, "vaswani", "cached")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with gzip.open(path, "wt") as f:
+            f.write("1 Q0 d1 0 1.0 cached\n")
+
+        vaswani_suite(generator_of((DummyTransformer(), "cached")), save_dir=temp_dir)
+
+        assert "save_dir" not in experiment_kwargs_for(mock_pt_experiment, 0)
+
+    def test_an_unnamed_pipeline_is_never_replayed(self, vaswani_suite, temp_dir):
+        config = vaswani_suite.resolve_config(save_dir=temp_dir)
+
+        assert vaswani_suite.cached_run_path("vaswani", None, config) is None
+
     def test_custom_run_file_layout_is_honoured(
         self, cleanup_suite_registry, temp_dir, mock_pt_get_dataset, mock_pt_experiment
     ):

@@ -27,11 +27,17 @@ def slugify(identifier: str) -> str:
 def ensure_string_ids(
     df: pd.DataFrame, cols: Sequence[str] = ID_COLUMNS
 ) -> pd.DataFrame:
-    """Coerce identifier columns to strings for safe joins/merges."""
-    for col in cols:
-        if col in df.columns:
-            df[col] = df[col].astype("string")
-    return df
+    """
+    Coerce identifier columns to strings for safe joins/merges.
+
+    Returns a new frame rather than editing the caller's: topics and qrels
+    come from objects that may hand out a shared or cached frame, and
+    rewriting their dtypes in place would be felt elsewhere.
+    """
+    present = [col for col in cols if col in df.columns]
+    if not present:
+        return df
+    return df.assign(**{col: df[col].astype("string") for col in present})
 
 
 def metric_columns(results: pd.DataFrame) -> list[str]:
