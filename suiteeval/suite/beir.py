@@ -30,6 +30,7 @@ datasets = [
     "beir/nfcorpus/test",
     "beir/nq",
     "beir/quora/test",
+    "beir/scidocs",
     "beir/scifact/test",
     "beir/trec-covid",
     "beir/webis-touche2020/v2",
