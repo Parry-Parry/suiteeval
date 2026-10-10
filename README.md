@@ -60,7 +60,7 @@ def pipelines(context):
     yield bm25 >> context.text_loader() >> MonoT5ReRanker(), "BM25 >> monoT5"
     yield bm25 >> context.text_loader() >> ElectraScorer(), "BM25 >> monoELECTRA"
 
-results = BEIR(pipelines)
+results = NanoBEIR(pipelines)
 ```
 
 This would product a table as follows:
@@ -214,7 +214,7 @@ For older environments, ensure standard PyTerrier transformer interfaces.
 
 | Version | Date       | Changes                                              |
 |--------:|------------|------------------------------------------------------|
-|   0.1.9 | 2026-10-10 | Suite internals split into modules; accept `trec_eval` measure strings; run files replay with their original settings |
+|   0.1.9 | 2026-10-10 | Add the missing `beir/scidocs` collection to the BEIR suite |
 |   0.1.8 | 2026-08-30 | Overridable evaluation hooks; fix `save_dir` being dropped after the first corpus |
 |   0.1.7 | 2026-02-16 | Tempoary removal of DL23 until qrels are adeed |
 |   0.1.6 | 2026-02-03 | Fix duplicate Overall rows, auto-detect all metrics  |
