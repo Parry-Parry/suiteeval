@@ -42,9 +42,8 @@ def temp_dir():
 def cleanup_suite_registry():
     """Clean up suite registry after test to avoid pollution between tests."""
     yield
-    for key in [k for k in SuiteMeta._classes if k.startswith("test_")]:
-        del SuiteMeta._classes[key]
-        SuiteMeta._instances.pop(key, None)
+    for name in [n for n in SuiteMeta.registered() if n.startswith("test_")]:
+        SuiteMeta.forget(name)
 
 
 @pytest.fixture

@@ -13,15 +13,15 @@ from __future__ import annotations
 import builtins
 from collections.abc import Iterator, Sequence as runtime_Sequence
 import inspect
-from typing import Any, Callable, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Sequence
 
 from pyterrier import Transformer
 
 from suiteeval.context import DatasetContext
 
 PipelineGenerator = Callable[[DatasetContext], Any]
-PipelineGenerators = Union[PipelineGenerator, Sequence[PipelineGenerator]]
-NamedPipeline = Tuple[Transformer, Optional[str]]
+PipelineGenerators = PipelineGenerator | Sequence[PipelineGenerator]
+NamedPipeline = tuple[Transformer, str | None]
 
 
 def normalize_generators(
@@ -52,7 +52,7 @@ def normalize_generators(
     return list(pipeline_generators)  # type: ignore[return-value]
 
 
-def _split_item(item: Any) -> Tuple[Any, Any]:
+def _split_item(item: Any) -> tuple[Any, Any]:
     """
     Split one generator output into ``(pipelines, names)``.
 
@@ -78,7 +78,7 @@ def iter_named_pipelines(item: Any) -> Iterator[NamedPipeline]:
             single name or a sequence of names.
 
     Yields:
-        tuple[Transformer, Optional[str]]: The pipeline and its optional name.
+        tuple[Transformer, str | None]: The pipeline and its optional name.
 
     Raises:
         ValueError: If the item is not a transformer or a sequence of transformers,
@@ -110,12 +110,16 @@ def iter_named_pipelines(item: Any) -> Iterator[NamedPipeline]:
 
 
 def _drain(output: Any) -> Iterator[NamedPipeline]:
-    """Flatten a lazy generator, reporting a leaked ``StopIteration`` clearly."""
+    """
+    Flatten a lazy generator, reporting a leaked ``StopIteration`` clearly.
+
+    PEP 479 turns a ``StopIteration`` that escapes a generator body into a
+    ``RuntimeError``, which says nothing about the generator that caused it.
+    """
     try:
         for item in output:
             yield from iter_named_pipelines(item)
     except RuntimeError as exc:
-        # PEP 479 turns leaked StopIteration into RuntimeError; surface a clear message.
         if "StopIteration" not in str(exc):
             raise
         raise ValueError(
@@ -136,7 +140,7 @@ def iter_generator_output(
         pipeline_generators: A callable or sequence of callables producing pipelines.
 
     Yields:
-        tuple[Transformer, Optional[str]]: Every pipeline with its optional name.
+        tuple[Transformer, str | None]: Every pipeline with its optional name.
     """
     for generator in normalize_generators(pipeline_generators, "pipeline_generators"):
         output = generator(context)
@@ -146,7 +150,7 @@ def iter_generator_output(
             yield from iter_named_pipelines(output)
 
 
-def fill_names(names: Sequence[Optional[str]]) -> Optional[list[str]]:
+def fill_names(names: Sequence[str | None]) -> list[str] | None:
     """
     Replace missing names with positional labels.
 
@@ -154,7 +158,7 @@ def fill_names(names: Sequence[Optional[str]]) -> Optional[list[str]]:
         names: Names aligned with a list of pipelines; entries may be ``None``.
 
     Returns:
-        Optional[list[str]]: The completed names, or ``None`` if none were given.
+        list[str] | None: The completed names, or ``None`` if none were given.
     """
     if not any(name is not None for name in names):
         return None

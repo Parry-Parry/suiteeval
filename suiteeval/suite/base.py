@@ -1,34 +1,42 @@
 from __future__ import annotations
 
-from abc import ABC, ABCMeta
-from collections.abc import Iterator
-import gzip
 import os
-from typing import Any, Generator, Optional, Sequence, Tuple, Union
+from abc import ABC, ABCMeta
+from collections.abc import Iterator, Sequence
 from logging import getLogger
+from typing import Any
 
-import numpy as np
 import ir_datasets as irds
-from ir_measures import nDCG, Measure, parse_measure, parse_trec_measure
 import pandas as pd
 import pyterrier as pt
+from ir_measures import Measure, nDCG
 from pyterrier import Transformer
 
 from suiteeval.context import DatasetContext
-from suiteeval.suite.config import (
-    RUN_FILE_COLUMNS,
-    RunConfig,
-    ensure_string_ids,
-    slugify,
-)
+from suiteeval.suite.config import RunConfig, ensure_string_ids, slugify
 from suiteeval.suite.config import metric_columns as _metric_columns
+from suiteeval.suite.datasets import (
+    DatasetSpec,
+    dataset_of,
+    irds_id_of,
+    normalise_datasets,
+    validate_dataset,
+)
+from suiteeval.suite.measures import discover_measures, measures_for_dataset
+from suiteeval.suite.measures import parse_measures as _parse_measures
 from suiteeval.suite.pipelines import (
     NamedPipeline,
     PipelineGenerators,
     fill_names,
     iter_generator_output,
 )
-from suiteeval.utility import geometric_mean
+from suiteeval.suite.registration import (
+    MetadataInput,
+    dataset_map,
+    normalise_metadata,
+)
+from suiteeval.suite.results import append_overall
+from suiteeval.suite.runfiles import RUN_FILE_SUFFIX, replay_run
 
 logger = getLogger(__name__)
 
@@ -44,22 +52,32 @@ class SuiteMeta(ABCMeta):
     """
 
     _classes: dict[str, type] = {}
-    _instances: dict[str, "Suite"] = {}
+    """Suite classes created by :meth:`register`, by the name they were given."""
+
+    _instances: dict[type, "Suite"] = {}
+    """
+    One instance per suite class. Keyed by the class itself, so two suites that happen
+    to share a name do not share an instance.
+    """
 
     def __call__(cls, *args, **kwargs):
-        # singleton: only one instance per class
-        if cls.__name__ not in SuiteMeta._instances:
-            SuiteMeta._instances[cls.__name__] = super().__call__(*args, **kwargs)
-        return SuiteMeta._instances[cls.__name__]
+        if cls not in SuiteMeta._instances:
+            SuiteMeta._instances[cls] = super().__call__(*args, **kwargs)
+        elif args or kwargs:
+            logger.warning(
+                f"{cls.__name__} is a singleton and already exists; the "
+                "arguments given to this call are ignored."
+            )
+        return SuiteMeta._instances[cls]
 
     @classmethod
     def register(
         mcs,
         suite_name: str,
         datasets: list[str],
-        names: Optional[list[str]] = None,
-        metadata: Optional[Union[list[dict[str, Any]], dict[str, Any]]] = None,
-        query_field: Optional[str] = None,
+        names: list[str] | None = None,
+        metadata: MetadataInput = None,
+        query_field: str | None = None,
     ) -> "Suite":
         """
         Create (or retrieve) a Suite singleton that wraps the given datasets.
@@ -69,11 +87,8 @@ class SuiteMeta(ABCMeta):
             datasets: IRDS dataset identifiers (e.g., ``"msmarco-passage/trec-dl-2019"``).
             names: Optional display names corresponding one-to-one with ``datasets``.
                 Defaults to ``datasets`` when omitted.
-            metadata: Optional metadata. Accepted forms:
-                * ``None`` → per-dataset empty dicts
-                * ``list[dict]`` → each entry applies to the corresponding dataset in ``names``/``datasets``
-                * ``dict[str, dict]`` → explicit mapping from dataset name/ID to metadata dict
-                * ``dict[str, Any]`` where values are not dicts → treated as flat metadata applied to all
+            metadata: Optional metadata, in any shape accepted by
+                :func:`suiteeval.suite.registration.normalise_metadata`.
             query_field: Optional topic field name to use when fetching topics (e.g., ``"title"``).
 
         Returns:
@@ -82,45 +97,76 @@ class SuiteMeta(ABCMeta):
         Raises:
             ValueError: If ``metadata`` has an unsupported shape or length.
         """
-        # if already registered, return existing instance
         if suite_name in mcs._classes:
             return mcs._classes[suite_name]()
 
-        # build the dataset name → dataset_id mapping
-        ds_names = names or datasets
-        dataset_map = dict(zip(ds_names, datasets))
+        name_to_id = dataset_map(datasets, names)
+        new_cls = mcs(
+            suite_name,
+            (Suite,),
+            {
+                "_datasets": name_to_id,
+                "_metadata": normalise_metadata(metadata, list(name_to_id)),
+                "_query_field": query_field,
+            },
+        )
 
-        # normalise metadata:
-        #  • None            → empty per-dataset dicts
-        #  • list[dict]      → metadata[i] applies to ds_names[i]
-        #  • dict[str,dict]  → per-dataset mapping (keys are names or IDs)
-        #  • dict[k,v] where v is NOT a dict → flat metadata for all
-        if metadata is None:
-            metadata_map = {name: {} for name in ds_names}
-        elif isinstance(metadata, list):
-            if len(metadata) != len(ds_names):
-                raise ValueError("`metadata` list must match number of datasets")
-            metadata_map = dict(zip(ds_names, metadata))
-        elif isinstance(metadata, dict):
-            if all(not isinstance(v, dict) for v in metadata.values()):
-                metadata_map = {name: metadata for name in ds_names}
-            else:
-                metadata_map = metadata
-        else:
-            raise ValueError(f"Unsupported metadata type: {type(metadata)}")
-
-        # dynamically create subclass with mappings
-        attrs = {
-            "_datasets": dataset_map,  # display-name -> dataset_id
-            "_dataset_ids": dataset_map,  # alias used by other methods
-            "_metadata": metadata_map,
-            "_query_field": query_field,
-        }
-        new_cls = mcs(suite_name, (Suite,), attrs)
-
-        # store class and return its singleton instance
         mcs._classes[suite_name] = new_cls
         return new_cls()
+
+    @classmethod
+    def forget(mcs, suite_name: str) -> None:
+        """
+        Drop a registered suite, so the name can be registered again.
+
+        Args:
+            suite_name: The name the suite was registered under. Unknown names
+                are ignored.
+        """
+        suite_cls = mcs._classes.pop(suite_name, None)
+        if suite_cls is not None:
+            mcs._instances.pop(suite_cls, None)
+
+    @classmethod
+    def registered(mcs) -> list[str]:
+        """The names of every suite created through :meth:`register`."""
+        return sorted(mcs._classes)
+
+
+class TopicsQrelsCache:
+    """
+    Topics and qrels prepared once per dataset, for the life of a corpus group.
+
+    Sequential mode evaluates one pipeline at a time against every dataset
+    sharing a corpus, so without this the topics and qrels of each dataset
+    would be re-read once per pipeline rather than once per dataset.
+
+    The cached frames are handed to every batch, on the usual PyTerrier
+    assumption that a transformer does not modify its input in place.
+    """
+
+    def __init__(self, suite: "Suite"):
+        self._suite = suite
+        self._prepared: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
+
+    def get(
+        self, dataset_ref: Any, dataset_name: str
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        The topics and qrels for one dataset, preparing them on first use.
+
+        Args:
+            dataset_ref: String identifier or dataset-like object.
+            dataset_name: Dataset display name.
+
+        Returns:
+            tuple[pandas.DataFrame, pandas.DataFrame]: ``(topics, qrels)``.
+        """
+        if dataset_name not in self._prepared:
+            self._prepared[dataset_name] = self._suite.prepare_topics_qrels(
+                dataset_of(dataset_ref), dataset_name
+            )
+        return self._prepared[dataset_name]
 
 
 class Suite(ABC, metaclass=SuiteMeta):
@@ -131,9 +177,8 @@ class Suite(ABC, metaclass=SuiteMeta):
 
     Attributes:
         _datasets: Either a ``dict[str, str]`` mapping display name → IRDS dataset ID,
-            or a ``list[str]`` of IRDS dataset IDs.
-        _dataset_ids: Normalized mapping of display name → IRDS dataset ID
-            (filled in by registration helpers).
+            or a ``list[str]`` of IRDS dataset IDs. Values may also be dataset-like
+            objects exposing ``_irds_id``, ``get_topics`` and ``get_qrels``.
         _metadata: Optional per-dataset or global metadata.
         _measures: A list of :class:`ir_measures.Measure` or a mapping from dataset name
             to such a list. When not provided, defaults are derived from metadata or
@@ -149,9 +194,11 @@ class Suite(ABC, metaclass=SuiteMeta):
     :meth:`resolve_config`          Split kwargs into a :class:`RunConfig`
     :meth:`iter_corpus_groups`      Group datasets by shared corpus
     :meth:`select_members`          Pick the datasets to evaluate in a group
+    :meth:`run_corpus_group`        Evaluate one corpus group start to finish
     :meth:`build_context`           Build the shared per-corpus context
     :meth:`iter_pipeline_batches`   Decide how pipelines are batched
     :meth:`wrap_pipeline`           Decorate each pipeline (filters, etc.)
+    :meth:`run_batch`               Take one batch across the group's datasets
     :meth:`prepare_topics_qrels`    Fetch and normalise topics/qrels
     :meth:`measures_for`            Choose metrics for a dataset
     :meth:`has_cached_run` /
@@ -159,7 +206,8 @@ class Suite(ABC, metaclass=SuiteMeta):
     :meth:`run_file_path`           Reuse run files written by a previous call
     :meth:`run_experiment`          The :func:`pyterrier.Experiment` call itself
     :meth:`annotate_results`        Tag result rows with their dataset
-    :meth:`release_pipelines`       Free memory between batches
+    :meth:`release_pipelines` /
+    :meth:`release_context`         Free memory between batches and groups
     :meth:`postprocess_results`     Aggregate the concatenated results
     ==============================  ==========================================
 
@@ -167,140 +215,90 @@ class Suite(ABC, metaclass=SuiteMeta):
         Instances are singletons per subclass (enforced by :class:`SuiteMeta`).
     """
 
-    _datasets: Union[list[str], dict[str, str]] = {}
-    _dataset_ids: dict[str, str] = {}
+    _datasets: list[str] | dict[str, str] = {}
     _metadata: dict[str, Any] = {}
-    _measures: Union[list[Measure], dict[str, list[Measure]], None] = None
+    _measures: list[Measure] | dict[str, list[Measure]] | None = None
     _default_measures: list[Measure] = [nDCG @ 10]
-    _query_field: Optional[str] = None
+    _query_field: str | None = None
 
     def __init__(self):
+        self._specs = normalise_datasets(self._datasets)
         self.coerce_measures(self._metadata)
         if "description" in self._metadata:
             self.__doc__ = self._metadata["description"]
         self.__post_init__()
 
     def __post_init__(self):
-        assert self._datasets, (
-            "Suite must have at least one dataset defined in _datasets"
-        )
+        """Validate the declaration. Override to add suite-specific checks."""
+        normalise_datasets(self._datasets)
+        if self._measures is None:
+            raise AssertionError("Suite must have measures defined in _measures")
 
-        if not isinstance(self._datasets, (dict, list)):
-            raise AssertionError(
-                "Suite _datasets must be a dict[name->id] or a list[dataset_id]"
-            )
+    _validate_dataset = staticmethod(validate_dataset)
 
-        if isinstance(self._datasets, dict):
-            for name, ds in self._datasets.items():
-                if not isinstance(name, str):
-                    raise AssertionError(
-                        f"Suite _datasets keys must be strings, got {type(name)}"
-                    )
-                self._validate_dataset(ds, repr(name))
-        else:
-            for i, ds in enumerate(self._datasets):
-                self._validate_dataset(ds, str(i))
+    _get_irds_id = staticmethod(irds_id_of)
+    _get_dataset_object = staticmethod(dataset_of)
 
-        assert self._measures is not None, (
-            "Suite must have measures defined in _measures"
-        )
-
-    @staticmethod
-    def _validate_dataset(ds: Any, where: str) -> None:
-        """Raise unless ``ds`` is a string ID or a dataset-like object."""
-        if isinstance(ds, str):
-            return
-        if all(hasattr(ds, attr) for attr in ("_irds_id", "get_topics", "get_qrels")):
-            return
-        raise AssertionError(
-            f"Suite _datasets[{where}] must be a string ID or a dataset "
-            "object with _irds_id, get_topics, and get_qrels"
-        )
-
-    # ------------------------------------------------------------------
-    # Dataset resolution
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _get_irds_id(ds_id_or_obj: Any) -> str:
-        """
-        Extract the IRDS ID from either a string ID or a dataset object.
-
-        Args:
-            ds_id_or_obj: Either a string IRDS ID or an object with `_irds_id` attribute.
-
-        Returns:
-            str: The IRDS ID.
-        """
-        if isinstance(ds_id_or_obj, str):
-            return ds_id_or_obj
-        return ds_id_or_obj._irds_id
+    @property
+    def _dataset_ids(self) -> dict[str, str]:
+        """Display name → IRDS identifier, derived from the declaration."""
+        return {spec.name: spec.irds_id for spec in self._specs}
 
     @classmethod
     def _display_name(cls, name_or_obj: Any) -> str:
         """Resolve a dataset key to the string used in results and paths."""
         if isinstance(name_or_obj, str):
             return name_or_obj
-        return cls._get_irds_id(name_or_obj)
+        return irds_id_of(name_or_obj)
 
-    @staticmethod
-    def _get_dataset_object(ds_id_or_obj: Any) -> pt.datasets.Dataset:
-        """
-        Get a PyTerrier Dataset object from either a string ID or a dataset object.
-
-        Args:
-            ds_id_or_obj: Either a string IRDS ID or a dataset object.
-
-        Returns:
-            pt.datasets.Dataset: The dataset object.
-        """
-        if isinstance(ds_id_or_obj, str):
-            return pt.get_dataset(f"irds:{ds_id_or_obj}")
-        return ds_id_or_obj
-
-    def _dataset_items(self) -> list[Tuple[Any, Any]]:
+    def _dataset_items(self) -> list[tuple[Any, Any]]:
         """Normalise ``_datasets`` to a list of ``(display_key, dataset_ref)``."""
-        if isinstance(self._datasets, dict):
-            return list(self._datasets.items())
-        return [(ds, ds) for ds in self._datasets]
+        return [spec.as_item() for spec in self._specs]
 
     def iter_corpus_groups(
         self,
-    ) -> Iterator[Tuple[str, pt.datasets.Dataset, list[Tuple[Any, Any]]]]:
+    ) -> Iterator[tuple[str, pt.datasets.Dataset, list[tuple[Any, Any]]]]:
         """
         Group the suite's datasets by the corpus they share.
 
         Membership is decided by :func:`ir_datasets.docs_parent_id`, so datasets
-        built on the same document collection are indexed once. Override to
+        built on the same document collection are indexed once. Groups are
+        yielded in the order their first dataset was declared. Override to
         impose a different grouping.
 
         Yields:
             tuple[str, pyterrier.datasets.Dataset, list[tuple[Any, Any]]]:
                 ``(corpus_id, corpus_dataset, [(display_key, dataset_ref), ...])``.
         """
-        groups: dict[str, dict] = {}
-        for name, ds_id_or_obj in self._dataset_items():
-            irds_id = self._get_irds_id(ds_id_or_obj)
-            try:
-                corpus_id = irds.docs_parent_id(irds_id) or irds_id
-            except Exception:
-                corpus_id = irds_id
+        corpus_datasets: dict[str, pt.datasets.Dataset] = {}
+        members: dict[str, list[tuple[Any, Any]]] = {}
 
-            if corpus_id not in groups:
-                corpus_ds = self._get_dataset_object(
-                    corpus_id if isinstance(corpus_id, str) else irds_id
+        for spec in self._specs:
+            corpus_id = self._corpus_id_for(spec)
+            if corpus_id not in members:
+                corpus_datasets[corpus_id] = dataset_of(
+                    corpus_id if isinstance(corpus_id, str) else spec.irds_id
                 )
-                groups[corpus_id] = {"corpus_ds": corpus_ds, "members": []}
+                members[corpus_id] = []
+            members[corpus_id].append(spec.as_item())
 
-            groups[corpus_id]["members"].append((name, ds_id_or_obj))
+        for corpus_id, group in members.items():
+            yield corpus_id, corpus_datasets[corpus_id], group
 
-        # deterministic iteration order (insertion order is fine here)
-        for corpus_id, group in groups.items():
-            yield corpus_id, group["corpus_ds"], group["members"]
+    @staticmethod
+    def _corpus_id_for(spec: DatasetSpec) -> str:
+        """The corpus a dataset belongs to, falling back to the dataset itself."""
+        try:
+            return irds.docs_parent_id(spec.irds_id) or spec.irds_id
+        except Exception as error:
+            logger.debug(
+                f"No parent corpus for '{spec.irds_id}'; indexing it alone: {error}"
+            )
+            return spec.irds_id
 
     def select_members(
-        self, members: Sequence[Tuple[Any, Any]], subset: Optional[str]
-    ) -> list[Tuple[Any, Any]]:
+        self, members: Sequence[tuple[Any, Any]], subset: str | None
+    ) -> list[tuple[Any, Any]]:
         """
         Choose which members of a corpus group to evaluate.
 
@@ -318,161 +316,63 @@ class Suite(ABC, metaclass=SuiteMeta):
         ]
 
     @property
-    def datasets(self) -> Generator[Tuple[str, pt.datasets.Dataset], None, None]:
+    def datasets(self) -> Iterator[tuple[str, pt.datasets.Dataset]]:
         """
         Iterate over declared datasets yielding display name and PyTerrier dataset.
 
+        Each access resolves the datasets afresh, so this is an iterator rather
+        than a list: take ``list(suite.datasets)`` to hold on to them.
+
         Yields:
             tuple[str, pyterrier.datasets.Dataset]: Pairs of (name, dataset object).
-
-        Raises:
-            ValueError: If ``_datasets`` has an invalid type.
         """
-        if not isinstance(self._datasets, (list, dict)):
-            raise ValueError(
-                "Suite _datasets must be a list or dict mapping names to dataset IDs."
-            )
-        for name, ds_id_or_obj in self._dataset_items():
-            yield self._display_name(name), self._get_dataset_object(ds_id_or_obj)
+        for spec in self._specs:
+            yield spec.name, spec.dataset()
 
-    # ------------------------------------------------------------------
-    # Measures
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def parse_measures(measures: Sequence[Union[str, Measure]]) -> list[Measure]:
-        """
-        Convert a list of measure strings or :class:`ir_measures.Measure` objects
-        into a flat ``list[Measure]``.
-
-        Args:
-            measures: A sequence containing measure strings (e.g., ``"nDCG@10"``)
-                and/or :class:`ir_measures.Measure` instances.
-
-        Returns:
-            list[Measure]: Parsed measure objects.
-
-        Raises:
-            ValueError: If a string entry cannot be parsed by either
-                :func:`ir_measures.parse_measure` or :func:`ir_measures.parse_trec_measure`,
-                or if an entry has an invalid type.
-        """
-        out: list[Measure] = []
-        for m in measures:
-            if isinstance(m, Measure):
-                out.append(m)
-                continue
-
-            if not isinstance(m, str):
-                raise ValueError(f"Invalid measure type: {type(m)}")
-
-            candidates: list[Measure] = []
-            for parser in (parse_measure, parse_trec_measure):
-                try:
-                    parsed = parser(m)
-                except ValueError:
-                    continue
-                candidates.extend(
-                    [parsed] if isinstance(parsed, Measure) else list(parsed)
-                )
-            if not candidates:
-                raise ValueError(f"Unrecognised measure string: {m!r}")
-            out.extend(candidates)
-
-        return out
+    parse_measures = staticmethod(_parse_measures)
 
     def coerce_measures(self, metadata: dict[str, Any]) -> None:
         """
-        Populate ``self._measures`` by aggregating available sources in priority order:
+        Populate ``self._measures`` when the suite does not state them directly.
 
-        1. Global ``metadata['official_measures']`` if present.
-        2. Per-dataset ``metadata[name]['official_measures']`` if present.
-        3. IRDS documentation ``official_measures`` for each dataset (when available).
-
-        If no measures are discovered, falls back to ``_default_measures``.
+        Sources are aggregated in priority order: global metadata, then
+        per-dataset metadata, then the IRDS documentation of each dataset,
+        falling back to ``_default_measures``. See
+        :func:`suiteeval.suite.measures.discover_measures`.
 
         Args:
             metadata: The suite metadata dictionary as configured at construction time.
-
-        Returns:
-            None
         """
         if self._measures is not None:
             return
-
-        measures: list[Measure] = []
-        seen: set[str] = set()
-
-        def _add_many(items: Optional[Sequence[Union[str, Measure]]]) -> None:
-            for m in self.parse_measures(items or []):
-                if str(m) not in seen:
-                    measures.append(m)
-                    seen.add(str(m))
-
-        if isinstance(metadata, dict):
-            # (1) global metadata, then (2) per-dataset metadata
-            _add_many(metadata.get("official_measures"))
-            for name in self._datasets:
-                per_dataset = metadata.get(name, {})
-                if isinstance(per_dataset, dict):
-                    _add_many(per_dataset.get("official_measures"))
-
-        # (3) ir_datasets documentation
-        if isinstance(self._dataset_ids, dict):
-            for name, ds_id in self._dataset_ids.items():
-                try:
-                    docs = getattr(irds.load(ds_id), "documentation", lambda: None)()
-                    if isinstance(docs, dict):
-                        _add_many(docs.get("official_measures"))
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to load measures from documentation for '{name}' ({ds_id}): {e}"
-                    )
-
-        if not measures:
-            logger.warning(
-                f"No measures discovered; defaulting to {self._default_measures}."
-            )
-            measures = list(self._default_measures)
-
-        self._measures = measures
+        self._measures = discover_measures(
+            [spec.name for spec in self._specs],
+            self._dataset_ids,
+            metadata,
+            self._default_measures,
+        )
 
     def get_measures(self, dataset: str) -> list[Measure]:
         """
-        Resolve the measures configured for a given dataset name.
+        The measures configured for one dataset.
 
-        Args:
-            dataset: Dataset display name as used in this suite.
-
-        Returns:
-            list[Measure]: The list configured for this dataset (or the suite-wide
-                list if a single list is maintained). Falls back to
-                ``_default_measures`` when the dataset is unknown.
+        ``_measures`` may be a suite-wide list or a per-dataset mapping; an
+        unknown dataset falls back to ``_default_measures``.
         """
-        if isinstance(self._measures, list):
-            return self._measures
-        return self._measures.get(dataset, self._default_measures)
+        return measures_for_dataset(self._measures, dataset, self._default_measures)
 
     def measures_for(
-        self, dataset_name: str, eval_metrics: Optional[Sequence[Any]] = None
+        self, dataset_name: str, eval_metrics: Sequence[Any] | None = None
     ) -> Sequence[Any]:
         """
         Decide which metrics to evaluate for one dataset.
 
-        Args:
-            dataset_name: Dataset display name.
-            eval_metrics: Explicit metrics supplied by the caller, if any.
-
-        Returns:
-            Sequence[Any]: ``eval_metrics`` when given, else the suite's configuration.
+        Metrics the caller supplied win; otherwise the suite's own
+        configuration is used. Override to vary metrics per dataset.
         """
         if eval_metrics is not None:
             return eval_metrics
         return self.get_measures(dataset_name)
-
-    # ------------------------------------------------------------------
-    # Pipeline coercion
-    # ------------------------------------------------------------------
 
     def wrap_pipeline(
         self, pipeline: Transformer, context: DatasetContext
@@ -513,7 +413,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                 applied to all pipelines or a sequence aligned with ``pipelines``.
 
         Yields:
-            tuple[Transformer, Optional[str]]: The pipeline and an optional display name.
+            tuple[Transformer, str | None]: The pipeline and an optional display name.
 
         Raises:
             ValueError: If a generator yields an invalid structure.
@@ -525,7 +425,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         self,
         context: DatasetContext,
         pipeline_generators: PipelineGenerators,
-    ) -> Tuple[list[Transformer], Optional[list[str]]]:
+    ) -> tuple[list[Transformer], list[str] | None]:
         """
         Materialize all pipelines (and optional names) into lists.
 
@@ -538,7 +438,7 @@ class Suite(ABC, metaclass=SuiteMeta):
                 conventions as in :meth:`coerce_pipelines_sequential`.
 
         Returns:
-            tuple[list[Transformer], Optional[list[str]]]:
+            tuple[list[Transformer], list[str] | None]:
                 A list of pipelines and, if provided, a list of corresponding names.
                 If no names were supplied, returns ``None`` for the second element.
 
@@ -546,7 +446,7 @@ class Suite(ABC, metaclass=SuiteMeta):
             ValueError: If the generators produce no pipelines or an invalid structure.
         """
         pipelines: list[Transformer] = []
-        names: list[Optional[str]] = []
+        names: list[str | None] = []
         for pipeline, name in self.coerce_pipelines_sequential(
             context, pipeline_generators
         ):
@@ -580,7 +480,7 @@ class Suite(ABC, metaclass=SuiteMeta):
             grouped: Whether all pipelines must be materialized together.
 
         Yields:
-            list[tuple[Transformer, Optional[str]]]: One batch of named pipelines.
+            list[tuple[Transformer, str | None]]: One batch of named pipelines.
         """
         if not grouped:
             for named_pipeline in self.coerce_pipelines_sequential(
@@ -591,10 +491,6 @@ class Suite(ABC, metaclass=SuiteMeta):
 
         pipelines, names = self.coerce_pipelines_grouped(context, pipeline_generators)
         yield list(zip(pipelines, names or [None] * len(pipelines)))
-
-    # ------------------------------------------------------------------
-    # Run files
-    # ------------------------------------------------------------------
 
     def index_dir_for(self, index_dir: str, corpus_id: str) -> str:
         """Directory holding the shared index for one corpus."""
@@ -609,7 +505,8 @@ class Suite(ABC, metaclass=SuiteMeta):
     ) -> str:
         """Path of the run file for one pipeline on one dataset."""
         return os.path.join(
-            self.save_dir_for(save_dir, dataset_name), f"{pipeline_name}.res.gz"
+            self.save_dir_for(save_dir, dataset_name),
+            f"{pipeline_name}{RUN_FILE_SUFFIX}",
         )
 
     def has_cached_run(
@@ -622,14 +519,8 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         Whether a previously written run can be replayed instead of re-run.
 
-        Args:
-            save_dir: Root run-file directory.
-            dataset_name: Dataset display name.
-            pipeline_name: Pipeline display name.
-            save_mode: PyTerrier save mode; ``"overwrite"`` always re-runs.
-
-        Returns:
-            bool: True when a reusable run file exists.
+        A PyTerrier ``save_mode`` of ``"overwrite"`` always re-runs. Override
+        alongside :meth:`run_file_path` to change where runs are looked for.
         """
         if save_mode == "overwrite":
             return False
@@ -637,28 +528,17 @@ class Suite(ABC, metaclass=SuiteMeta):
 
     def load_cached_run(self, filepath: str) -> Transformer:
         """
-        Load a gzipped TREC run file into a transformer that replays it.
+        Load the run file at ``filepath`` into a transformer that replays it.
 
-        Args:
-            filepath: Path returned by :meth:`run_file_path`.
-
-        Returns:
-            Transformer: A transformer yielding the stored ranking.
+        See :func:`suiteeval.suite.runfiles.replay_run`.
         """
-        with gzip.open(filepath, "rt") as f:
-            run = pd.read_csv(f, sep=r"\s+", header=None, names=RUN_FILE_COLUMNS)
-        run = ensure_string_ids(run[["qid", "docno", "score", "rank"]])
-        return pt.Transformer.from_df(run)
+        return replay_run(filepath)
 
     def prepare_save_dir(self, save_dir: str, dataset_name: str) -> str:
         """Create and return the run-file directory for one dataset."""
         path = self.save_dir_for(save_dir, dataset_name)
         os.makedirs(path, exist_ok=True)
         return path
-
-    # ------------------------------------------------------------------
-    # Evaluation
-    # ------------------------------------------------------------------
 
     def build_context(
         self,
@@ -688,16 +568,12 @@ class Suite(ABC, metaclass=SuiteMeta):
 
     def prepare_topics_qrels(
         self, dataset: pt.datasets.Dataset, dataset_name: str
-    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Fetch topics and qrels for one dataset, with identifier columns as strings.
+        Fetch ``(topics, qrels)`` for one dataset, with identifiers as strings.
 
-        Args:
-            dataset: A :class:`pyterrier.datasets.Dataset` instance.
-            dataset_name: Dataset display name.
-
-        Returns:
-            tuple[pandas.DataFrame, pandas.DataFrame]: ``(topics, qrels)``.
+        ``_query_field`` selects the topic field. Prepared once per dataset per
+        corpus group, so an override may do real work here.
         """
         topics = ensure_string_ids(dataset.get_topics(self._query_field), ("qid",))
         qrels = ensure_string_ids(dataset.get_qrels(), ("qid", "docno"))
@@ -706,7 +582,7 @@ class Suite(ABC, metaclass=SuiteMeta):
     def run_experiment(
         self,
         pipelines: Sequence[Transformer],
-        names: Sequence[Optional[str]],
+        names: Sequence[str | None],
         topics: pd.DataFrame,
         qrels: pd.DataFrame,
         dataset_name: str,
@@ -751,9 +627,14 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         Evaluate one batch of pipelines against one dataset.
 
-        Pipelines with a reusable run file are replayed from disk one by one; the
-        remainder are evaluated together in a single experiment so that
-        cross-system tests still see the full set.
+        Every pipeline with a reusable run file is swapped for a transformer
+        that replays it, and the batch is then evaluated in a single
+        experiment. Keeping the batch whole and in order is what lets a
+        ``baseline`` index mean what the caller meant, and what lets a
+        cross-system test see every system.
+
+        ``save_dir`` reaches PyTerrier only when at least one pipeline in the
+        batch actually has to run, so a fully replayed batch writes nothing.
 
         Args:
             batch: ``(pipeline, name)`` pairs to evaluate.
@@ -763,42 +644,32 @@ class Suite(ABC, metaclass=SuiteMeta):
             config: The resolved run configuration.
 
         Yields:
-            pandas.DataFrame: One frame per experiment performed.
+            pandas.DataFrame: The results of the experiment, if there was one.
         """
-        pending: list[NamedPipeline] = []
-
-        for pipeline, name in batch:
-            if not (
-                config.save_dir
-                and name
-                and self.has_cached_run(
-                    config.save_dir, dataset_name, name, config.save_mode
-                )
-            ):
-                pending.append((pipeline, name))
-                continue
-
-            filepath = self.run_file_path(config.save_dir, dataset_name, name)
-            logger.info(f"Loading '{name}' for {dataset_name} from {filepath}")
-            yield self.run_experiment(
-                [self.load_cached_run(filepath)],
-                [name],
-                topics,
-                qrels,
-                dataset_name,
-                config,
-            )
-
-        if not pending:
+        if not batch:
             return
 
+        pipelines: list[Transformer] = []
+        names: list[str | None] = []
+        any_fresh = False
+
+        for pipeline, name in batch:
+            filepath = self.cached_run_path(dataset_name, name, config)
+            if filepath is None:
+                any_fresh = True
+            else:
+                logger.info(f"Loading '{name}' for {dataset_name} from {filepath}")
+                pipeline = self.load_cached_run(filepath)
+            pipelines.append(pipeline)
+            names.append(name)
+
         kwargs = dict(config.experiment_kwargs)
-        if config.save_dir is not None:
+        if any_fresh and config.save_dir is not None:
             kwargs["save_dir"] = self.prepare_save_dir(config.save_dir, dataset_name)
 
         yield self.run_experiment(
-            [pipeline for pipeline, _ in pending],
-            [name for _, name in pending],
+            pipelines,
+            names,
             topics,
             qrels,
             dataset_name,
@@ -806,19 +677,37 @@ class Suite(ABC, metaclass=SuiteMeta):
             **kwargs,
         )
 
+    def cached_run_path(
+        self, dataset_name: str, pipeline_name: str | None, config: RunConfig
+    ) -> str | None:
+        """
+        The run file to replay for one pipeline, or ``None`` to run it.
+
+        Args:
+            dataset_name: Dataset display name.
+            pipeline_name: Pipeline display name; an unnamed pipeline has no
+                run file to look for.
+            config: The resolved run configuration.
+
+        Returns:
+            str | None: Path of a reusable run file, if there is one.
+        """
+        if not (config.save_dir and pipeline_name):
+            return None
+        if not self.has_cached_run(
+            config.save_dir, dataset_name, pipeline_name, config.save_mode
+        ):
+            return None
+        return self.run_file_path(config.save_dir, dataset_name, pipeline_name)
+
     def annotate_results(
         self, results: pd.DataFrame, dataset_name: str, corpus_id: str
     ) -> pd.DataFrame:
         """
         Tag a result frame with the dataset it came from.
 
-        Args:
-            results: Raw frame returned by :meth:`run_experiment`.
-            dataset_name: Dataset display name.
-            corpus_id: Identifier of the corpus the dataset belongs to.
-
-        Returns:
-            pandas.DataFrame: The annotated frame.
+        The default sets ``dataset`` and ignores ``corpus_id``; override to
+        record more about where a row came from. Modifies ``results`` in place.
         """
         results["dataset"] = dataset_name
         return results
@@ -828,23 +717,28 @@ class Suite(ABC, metaclass=SuiteMeta):
         """
         Best-effort memory cleanup between pipeline batches.
 
-        Calls ``gc.collect()`` and, if ``torch.cuda.is_available()``, empties the CUDA cache.
-        Silently ignores any exceptions (CUDA and torch are optional).
+        Collects garbage and, when torch is installed with a CUDA device,
+        empties its cache. Failures are ignored: both are optional.
         """
         import gc
 
         gc.collect()
         try:
-            import torch  # noqa: WPS433 — optional dependency
+            import torch
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except Exception:
             pass
 
-    # ------------------------------------------------------------------
-    # Results
-    # ------------------------------------------------------------------
+    def release_context(self, context: DatasetContext) -> None:
+        """
+        Release a corpus context once its group has been evaluated.
+
+        The default does nothing: the context is dropped immediately
+        afterwards, and the index it points at is meant to outlive the run.
+        Override to close a handle or delete a scratch index.
+        """
 
     @staticmethod
     def metric_columns(results: pd.DataFrame) -> list[str]:
@@ -870,31 +764,7 @@ class Suite(ABC, metaclass=SuiteMeta):
         Returns:
             pandas.DataFrame: The input results with additional ``Overall`` rows appended.
         """
-        # Idempotency check: skip if Overall rows already exist
-        if "dataset" not in results.columns or "Overall" in results["dataset"].values:
-            return results
-
-        measure_cols = self.metric_columns(results)
-        if not measure_cols:
-            return results
-
-        per_dataset = (
-            results.groupby(["dataset", "name"], dropna=False)[measure_cols]
-            .mean()
-            .reset_index()
-        )
-
-        overall_rows = []
-        for name, group in per_dataset.groupby("name", dropna=False):
-            row = {"dataset": "Overall", "name": name}
-            for col in measure_cols:
-                values = pd.to_numeric(group[col], errors="coerce").dropna().values
-                if np.any(values <= 0):
-                    values = values + 1e-12
-                row[col] = geometric_mean(values)
-            overall_rows.append(row)
-
-        return pd.concat([results, pd.DataFrame(overall_rows)], ignore_index=True)
+        return append_overall(results, self.metric_columns(results))
 
     def postprocess_results(
         self, results: pd.DataFrame, config: RunConfig
@@ -916,14 +786,10 @@ class Suite(ABC, metaclass=SuiteMeta):
             return results
         return self.compute_overall_mean(results)
 
-    # ------------------------------------------------------------------
-    # Entry point
-    # ------------------------------------------------------------------
-
     def resolve_config(
         self,
-        eval_metrics: Optional[Sequence[Any]] = None,
-        subset: Optional[str] = None,
+        eval_metrics: Sequence[Any] | None = None,
+        subset: str | None = None,
         compute_overall: bool = True,
         **experiment_kwargs: Any,
     ) -> RunConfig:
@@ -985,37 +851,86 @@ class Suite(ABC, metaclass=SuiteMeta):
             selected = self.select_members(members, config.subset)
             if not selected:
                 continue
+            yield from self.run_corpus_group(
+                corpus_id, corpus_ds, selected, ranking_generators, config
+            )
 
-            context = self.build_context(corpus_id, corpus_ds, config)
-            try:
-                batches = self.iter_pipeline_batches(
-                    context, ranking_generators, config.grouped
-                )
-                for batch in batches:
-                    try:
-                        for key, dataset_ref in selected:
-                            dataset_name = self._display_name(key)
-                            dataset = self._get_dataset_object(dataset_ref)
-                            topics, qrels = self.prepare_topics_qrels(
-                                dataset, dataset_name
-                            )
-                            for frame in self.evaluate_batch(
-                                batch, topics, qrels, dataset_name, config
-                            ):
-                                yield self.annotate_results(
-                                    frame, dataset_name, corpus_id
-                                )
-                    finally:
-                        del batch
-                        self.release_pipelines()
-            finally:
-                del context
+    def run_corpus_group(
+        self,
+        corpus_id: str,
+        corpus_ds: pt.datasets.Dataset,
+        members: Sequence[tuple[Any, Any]],
+        ranking_generators: PipelineGenerators,
+        config: RunConfig,
+    ) -> Iterator[pd.DataFrame]:
+        """
+        Evaluate every pipeline against the datasets sharing one corpus.
+
+        One context is built for the group, so indexing happens once, and each
+        batch of pipelines is released as soon as every dataset in the group
+        has been evaluated against it.
+
+        Args:
+            corpus_id: The shared corpus identifier.
+            corpus_ds: The PyTerrier dataset for that corpus.
+            members: ``(display_key, dataset_ref)`` pairs to evaluate.
+            ranking_generators: Callable or sequence of callables producing pipelines.
+            config: The resolved run configuration.
+
+        Yields:
+            pandas.DataFrame: Annotated result frames, in evaluation order.
+        """
+        context = self.build_context(corpus_id, corpus_ds, config)
+        topics_qrels = TopicsQrelsCache(self)
+        try:
+            for batch in self.iter_pipeline_batches(
+                context, ranking_generators, config.grouped
+            ):
+                try:
+                    yield from self.run_batch(
+                        batch, members, topics_qrels, corpus_id, config
+                    )
+                finally:
+                    del batch
+                    self.release_pipelines()
+        finally:
+            self.release_context(context)
+            del context
+
+    def run_batch(
+        self,
+        batch: Sequence[NamedPipeline],
+        members: Sequence[tuple[Any, Any]],
+        topics_qrels: "TopicsQrelsCache",
+        corpus_id: str,
+        config: RunConfig,
+    ) -> Iterator[pd.DataFrame]:
+        """
+        Evaluate one batch of pipelines against every dataset in a corpus group.
+
+        Args:
+            batch: ``(pipeline, name)`` pairs to evaluate together.
+            members: ``(display_key, dataset_ref)`` pairs to evaluate against.
+            topics_qrels: Per-group cache of prepared topics and qrels.
+            corpus_id: Identifier of the corpus the datasets belong to.
+            config: The resolved run configuration.
+
+        Yields:
+            pandas.DataFrame: Annotated result frames, in evaluation order.
+        """
+        for key, dataset_ref in members:
+            dataset_name = self._display_name(key)
+            topics, qrels = topics_qrels.get(dataset_ref, dataset_name)
+            for frame in self.evaluate_batch(
+                batch, topics, qrels, dataset_name, config
+            ):
+                yield self.annotate_results(frame, dataset_name, corpus_id)
 
     def __call__(
         self,
         ranking_generators: PipelineGenerators,
-        eval_metrics: Optional[Sequence[Any]] = None,
-        subset: Optional[str] = None,
+        eval_metrics: Sequence[Any] | None = None,
+        subset: str | None = None,
         compute_overall: bool = True,
         **experiment_kwargs: Any,
     ) -> pd.DataFrame:
@@ -1061,4 +976,4 @@ class Suite(ABC, metaclass=SuiteMeta):
         return self.postprocess_results(results, config)
 
 
-__all__ = ["Suite", "SuiteMeta", "RunConfig"]
+__all__ = ["RunConfig", "Suite", "SuiteMeta", "TopicsQrelsCache"]
