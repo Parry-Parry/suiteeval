@@ -60,7 +60,7 @@ def pipelines(context):
     yield bm25 >> context.text_loader() >> MonoT5ReRanker(), "BM25 >> monoT5"
     yield bm25 >> context.text_loader() >> ElectraScorer(), "BM25 >> monoELECTRA"
 
-results = BEIR(pipelines)
+results = NanoBEIR(pipelines)
 ```
 
 This would product a table as follows:
