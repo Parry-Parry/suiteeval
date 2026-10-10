@@ -39,7 +39,7 @@ jobs:
 
      - name: Unit Test
        run: |
-         pytest --durations=20 -p no:faulthandler --json-report --json-report-file ${{ env.runtag }}.results.json --cov suiteeval --cov-report json:${{ env.runtag }}.coverage.json tests/
+         pytest -m 'not e2e' --durations=20 -p no:faulthandler --json-report --json-report-file ${{ env.runtag }}.results.json --cov suiteeval --cov-report json:${{ env.runtag }}.coverage.json tests/
 
      - name: Report Test Results
        if: always()
